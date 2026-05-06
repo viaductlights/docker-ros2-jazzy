@@ -2,7 +2,7 @@
 runs ros2-jazzy on bazzite linux with turtlebot4 and other misc useful ros packages pre installed. includes dummy ros2 package called "robot_modelling" for a project in another class
 
 ### switch to bazzite-dx for docker/vscode  
-check current system, rebase if not already bazzite-dx
+check current system, rebase if not already bazzite-dx  
 `rpm-ostree status`  
 `brh rebase bazzite-dx:stable`  
 `systemctl reboot`  
