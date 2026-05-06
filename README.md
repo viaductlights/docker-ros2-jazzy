@@ -6,6 +6,7 @@ check current system, then rebase
 `rpm-ostree status`  
 `brh rebase bazzite-dx:stable`  
 `systemctl reboot`  
+
 check if docker group has been created, and if not (due to known ublue-os ujust dx-group bug), add docker group and local user   
 `groups`  
 `sudo groupadd docker`  
@@ -13,6 +14,7 @@ check if docker group has been created, and if not (due to known ublue-os ujust 
 `systemctl reboot`  
 `ujust dx-group`  
 `systemctl reboot`  
+
 test  
 `docker run hello-world`  
 
