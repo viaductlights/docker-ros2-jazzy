@@ -1,7 +1,7 @@
 ## docker container for probabilistic robotics lab project  
 runs ros2-jazzy on bazzite linux with turtlebot4 and other misc useful ros packages pre installed
 
-### switching to bazzite-dx for docker/vscode  
+### switch to bazzite-dx for docker/vscode  
 check current system, then rebase  
 `rpm-ostree status`  
 `brh rebase bazzite-dx:stable`  
