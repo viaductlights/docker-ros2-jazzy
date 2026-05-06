@@ -1,13 +1,13 @@
 ## docker container for probabilistic robotics lab project  
-runs ros2-jazzy on bazzite linux with turtlebot4 and other misc useful ros packages pre installed
+runs ros2-jazzy on bazzite linux with turtlebot4 and other misc useful ros packages pre installed. includes dummy ros2 package called "robot_modelling" for a project in another class
 
 ### switch to bazzite-dx for docker/vscode  
-check current system, then rebase  
+check current system, rebase if not already bazzite-dx
 `rpm-ostree status`  
 `brh rebase bazzite-dx:stable`  
 `systemctl reboot`  
 
-check if docker group has been created, and if not (due to known ublue-os ujust dx-group bug), add docker group and local user   
+check if docker group has been created, and if not (due to known ublue-os ujust dx-group bug as of 4.2026), add docker group and local user   
 `groups`  
 `sudo groupadd docker`  
 `sudo usermod -aG docker $USER`  
