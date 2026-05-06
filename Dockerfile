@@ -1,7 +1,7 @@
 ARG ROS_DISTRO=jazzy
 
 FROM ros:${ROS_DISTRO}-ros-base
-LABEL maintainer="Jiayi Zhou <re25m012@technikum-wien.at>"
+LABEL maintainer="<re25m012@technikum-wien.at>"
 ARG OVERLAY_WS=/opt/ros/overlay_ws
 ARG GZ_VERSION=harmonic
 
