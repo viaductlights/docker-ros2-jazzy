@@ -1,1 +1,1 @@
-dummy directory for robot modelling projects
+ros2 packages
