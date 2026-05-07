@@ -39,7 +39,7 @@ create_shared_folder()
 		echo ""
 		
 		# Create the directory and its parent directories if they don't exist
-		mkdir -p $PARENT_PATH/src
+		mkdir -p "$PARENT_PATH/src"
 	fi
 }
 
