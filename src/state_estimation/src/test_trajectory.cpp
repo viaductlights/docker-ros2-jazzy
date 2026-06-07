@@ -26,7 +26,6 @@ class TestPath : public rclcpp::Node{
 		TestPath() : Node("path"), count_(0){
 			init_publisher_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("initialpose", 10); // initialize tb4 initial pose for localization
 			tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&TestPath::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
-//			tb4_gt_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("tb4_gt_pose", 10); // initialize subscribed tb4 ground truth pose publisher
 			tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 
 			this->declare_parameter<int>("tb4_object_index", 1); // parameter for tb4's index within pose array
@@ -41,9 +40,6 @@ class TestPath : public rclcpp::Node{
 		}
 
 	private:
-/*		void publish_path(){
-
-		}*/
 		void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
 		  int tb4_index = this->get_parameter("tb4_object_index").as_int();
 		  
@@ -56,7 +52,7 @@ class TestPath : public rclcpp::Node{
 		  geometry_msgs::msg::PoseStamped current_pose_stamped;
 		  current_pose_stamped.header.stamp = msg->header.stamp;
 		  current_pose_stamped.header.frame_id = "base_link";
-		  current_pose_stamped.pose.position.x = tb4_pose.position.x + 8.0; //off set for difference in rviz and gz sim's coordinate system
+		  current_pose_stamped.pose.position.x = tb4_pose.position.x + 8.0; //offset for difference in rviz and gz sim's coordinate system
 		  current_pose_stamped.pose.position.y = tb4_pose.position.y;
 		  current_pose_stamped.pose.position.z = tb4_pose.position.z;
 		  current_pose_stamped.pose.orientation.x = tb4_pose.orientation.x;
@@ -69,9 +65,10 @@ class TestPath : public rclcpp::Node{
 		  accumulated_path_.header.frame_id = "map";
 		  accumulated_path_.poses.push_back(current_pose_stamped);
 
-/*		  if (accumulated_path_.poses.size() > 1000){
-			  accumulated_path_.poses.erase(accumulated_path_.poses.begin());
-		  }*/
+		  //current test trajectory manageable. uncomment in future if problem
+		  //if (accumulated_path_.poses.size() > 10000){ 
+			//  accumulated_path_.poses.erase(accumulated_path_.poses.begin());
+		  //}
 
 		  tb4_gt_path_publisher_->publish(accumulated_path_);
 		}
