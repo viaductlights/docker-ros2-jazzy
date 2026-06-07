@@ -27,29 +27,25 @@ class KalmanFilter : public rclcpp::Node{
 
 	  cmd_vel_sub_.subscribe(this, "cmd_vel", qos.get_rmw_qos_profile());
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
-//	  cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel", qos, std::bind());
-//	  odom_sub_ = this->create_subscription<nav_msgs::msg::Odom>("odom", 10, qos, std::bind(&KalmanFilter::odom_callback, this));
 //	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped("pose_kf", 10);
-//	  timer1_ = this->create_wall_timer(500ms, std::bind(&KalmanFilter::cmdVelTimerCallback, this));
-//	  timer2_ = this->create_wall_timer(550ms, std::bind(&KalmanFilter::odomTimerCallback, this));
 	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
 //	  pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
 	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_kf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_kf_path", 10); // initialize tb4 kf filter path publisher
 	
-  	  this->declare_parameter<int>("tb4_object_index", 1);
+  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
 	  accumulated_path_.header.frame_id = "map";	  
 	  
 	  uint32_t queue_size = 10;
-	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_);
+	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_); // initialize approximate time message filter for odom and cmd_vel msgs
 	  
 	  sync->setAgePenalty(0.50);
-	  sync->registerCallback(std::bind(&KalmanFilter::syncCallback, this, _1, _2));
+	  sync->registerCallback(std::bind(&KalmanFilter::syncCallback, this, _1, _2)); // sync callback for message filter
 	}
 
   private:
 	void syncCallback(const geometry_msgs::msg::TwistStamped::ConstSharedPtr & cmd_vel, const nav_msgs::msg::Odometry::ConstSharedPtr & odom){
-	  RCLCPP_INFO(this->get_logger(), "sync callback with cmdl %f, cmda %f, odomx %f, y %f, theta %f", cmd_vel->twist.linear.x, cmd_vel->twist.linear.z, odom->pose.pose.position.x, odom->pose.pose.position.y, odom->pose.pose.orientation.w);
+	  RCLCPP_INFO(this->get_logger(), "sync callback with cmdl time %u and odom time %u \n cmdl %f, cmda %f, odomx %f, y %f, theta %f", cmd_vel->header.stamp.nanosec, odom->header.stamp.nanosec, cmd_vel->twist.linear.x, cmd_vel->twist.linear.z, odom->pose.pose.position.x, odom->pose.pose.position.y, odom->pose.pose.orientation.w); // debugging
 	  double cv_l = cmd_vel->twist.linear.x;
 	  double cv_a = cmd_vel->twist.linear.z;
 	  double odom_x = odom->pose.pose.position.x;
@@ -60,14 +56,15 @@ class KalmanFilter : public rclcpp::Node{
 	  Eigen::Matrix3d Kalman_gain_;
 	  Eigen::Vector3d Sensor_data(odom_x, odom_y, odom_theta); 
 
-	  State_bar_ = pose_expected_t(cv_l, cv_a);	//predict tb4 state by applying motion model
-	  Sigma_bar_ = covariance_t();	//incorporate process noise into covariance matrix
-	  Kalman_gain_ = kalman_gain_t(Sigma_bar_); //incorporate measurement noise, covariance for sensor correction
-	  State_ = pose_updated_t(State_bar_, Kalman_gain_, Sensor_data); //corrected tb4 state
-	  Sigma_ = covariance_updated_t(Kalman_gain_, Sigma_bar_); //corrected state covariance matrix
+	  State_bar_ = pose_expected_t(cv_l, cv_a);	// predict tb4 state by applying motion model
+	  Sigma_bar_ = covariance_t();	// incorporate process noise into covariance matrix
+	  Kalman_gain_ = kalman_gain_t(Sigma_bar_); // incorporate measurement noise, covariance for sensor correction
+	  State_ = pose_updated_t(State_bar_, Kalman_gain_, Sensor_data); // corrected tb4 state
+	  Sigma_ = covariance_updated_t(Kalman_gain_, Sigma_bar_); // corrected state covariance matrix
 
-	  RCLCPP_INFO(this->get_logger(), "expectedx: %f, y: %f, theta: %f, pose x: %f, y: %f, theta: %f, covariance 1: %f, 2: %f, 3: %f", State_bar_(0), State_bar_(1), State_bar_(2), State_(0), State_(1), State_(2), Sigma_(0,0), Sigma_(1,1), Sigma_(2,2));
+	  RCLCPP_INFO(this->get_logger(), "expectedx: %f, y: %f, theta: %f, pose x: %f, y: %f, theta: %f, covariance 1: %f, 2: %f, 3: %f", State_bar_(0), State_bar_(1), State_bar_(2), State_(0), State_(1), State_(2), Sigma_(0,0), Sigma_(1,1), Sigma_(2,2)); // debugging
 
+	  // temporary pose publisher for testing. will comment out in favour of posestampedwithcovariance msg pub
 	  geometry_msgs::msg::PoseStamped pose_msg;
 	  pose_msg.header.stamp = this->now();
 	  pose_msg.header.frame_id = "map";
@@ -77,6 +74,7 @@ class KalmanFilter : public rclcpp::Node{
 	  publish_pose_t(pose_msg);
 	}
 
+	// helper functions for kf algo
 	Eigen::Vector3d pose_expected_t(const double & linear_vel, const double & angular_vel){
 	  Eigen::Vector3d tb4_expected;
 	  Control_(0) = linear_vel;
@@ -110,6 +108,7 @@ class KalmanFilter : public rclcpp::Node{
 	  return covariance_corrected;
 	}
 	
+	//temporary kf path publisher for testing purposes. will comment out in favour of posestampedwithcovariance pub/sub
 	void publish_pose_t(const geometry_msgs::msg::PoseStamped & msg){
 
 	  geometry_msgs::msg::PoseStamped current_pose_stamped;
@@ -125,6 +124,7 @@ class KalmanFilter : public rclcpp::Node{
 	
 	}
 
+	// tb4 ground_truth path publisher for kf testing purposes. will comment out in favour of ground_truth publisher in test_trajectory node
 	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
 	  int tb4_index = this->get_parameter("tb4_object_index").as_int();
 	  if (tb4_index < 0 || static_cast<size_t>(tb4_index) >= msg->poses.size()){
@@ -137,7 +137,7 @@ class KalmanFilter : public rclcpp::Node{
           geometry_msgs::msg::PoseStamped current_pose_stamped;
           current_pose_stamped.header.stamp = msg->header.stamp;
           current_pose_stamped.header.frame_id = "base_link";
-          current_pose_stamped.pose.position.x = tb4_pose.position.x + 8.0; //offset for difference in rviz and gz sim's coordinate system
+          current_pose_stamped.pose.position.x = tb4_pose.position.x + 8.0; // offset for difference in rviz and gz sim's coordinate system
           current_pose_stamped.pose.position.y = tb4_pose.position.y;
           current_pose_stamped.pose.position.z = tb4_pose.position.z;
           current_pose_stamped.pose.orientation.x = tb4_pose.orientation.x;
@@ -154,26 +154,23 @@ class KalmanFilter : public rclcpp::Node{
 	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_kf_path_;
 
-//	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_kf_path_publisher_;
+//	rclcpp::Publisher<geometry_msgs::msg::PoseStampedWithCovariance>::SharedPtr pose_publisher_;
 	message_filters::Subscriber<geometry_msgs::msg::TwistStamped> cmd_vel_sub_;
 	message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
-	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>> sync;
 	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_;
+	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>> sync;
 
 	Eigen::Matrix3d A_ = Eigen::Matrix3d::Identity(3, 3);
-	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3);
+	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3) * 0.05; // message filter syncing cmd_vel msgs elapses approximately 50 ms btw msgs
 	Eigen::Matrix3d C_ = Eigen::Matrix3d::Identity(3, 3);
-	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 1); //initialize robot state vector at time = 0
-	Eigen::Vector3d Control_ = Eigen::Vector3d(0, 0, 0); //initialize control vector at time = 0						   
-	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3); //initialize starting covariance to one since tb4's state is known at t = 0
+	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 1); // initialize robot state vector at time = 0
+	Eigen::Vector3d Control_ = Eigen::Vector3d(0, 0, 0); // initialize control vector at time = 0						   
+	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3); // initialize starting covariance to one since tb4's state is known at t = 0
 
-	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.03 ; //1e-1
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; //1e-5
-
-//	rclcpp::TimerBase::SharedPtr timer1_;
-//	rclcpp::TimerBase::SharedPtr timer2_;
+	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.03 ; // initial test value
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initial test value
 };
 
 int main (int argc, char ** argv){
@@ -183,7 +180,7 @@ int main (int argc, char ** argv){
   return 0;
 }
 
-
+// depreciated functions from early stages testing
 /*	void cmdVelTimerCallback(){
 	  RCLCPP_INFO(this->get_logger(), "cmd_vel callback");
 	}
