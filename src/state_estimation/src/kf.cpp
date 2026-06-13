@@ -47,7 +47,7 @@ class KalmanFilter : public rclcpp::Node{
 	void syncCallback(const geometry_msgs::msg::TwistStamped::ConstSharedPtr & cmd_vel, const nav_msgs::msg::Odometry::ConstSharedPtr & odom){
 	  RCLCPP_INFO(this->get_logger(), "sync callback with cmdl time %u and odom time %u \n cmdl %f, cmda %f, odomx %f, y %f, theta %f", cmd_vel->header.stamp.nanosec, odom->header.stamp.nanosec, cmd_vel->twist.linear.x, cmd_vel->twist.linear.z, odom->pose.pose.position.x, odom->pose.pose.position.y, odom->pose.pose.orientation.w); // debugging
 	  double cv_l = cmd_vel->twist.linear.x;
-	  double cv_a = cmd_vel->twist.linear.z;
+	  double cv_a = cmd_vel->twist.angular.z;
 	  double odom_x = odom->pose.pose.position.x;
 	  double odom_y = odom->pose.pose.position.y;
 	  double odom_theta = odom->pose.pose.orientation.w;
