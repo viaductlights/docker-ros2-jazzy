@@ -117,9 +117,9 @@ class TestPath : public rclcpp::Node{
 		  };
 
 		  auto goal_msg = NavigateThroughPoses::Goal();
-		  goal_msg.poses.push_back(make_pose( 4.0, 0.0, 0.0, 1.0)); //point1
-		  goal_msg.poses.push_back(make_pose( 7.0, 6.0, 0.0, 1.0)); //point2			
-		  goal_msg.poses.push_back(make_pose( 7.0, 2.35, 0.0, 0.0)); //point3							       
+		  goal_msg.poses.push_back(make_pose( 0.0, 0.0, 0.0, 1.0)); //point1
+//		  goal_msg.poses.push_back(make_pose( 7.0, 6.0, 0.0, 1.0)); //point2			
+//		  goal_msg.poses.push_back(make_pose( 7.0, 2.35, 0.0, 0.0)); //point3							       
 		  RCLCPP_INFO(this->get_logger(), "Sending pose1");
 		  RCLCPP_INFO(this->get_logger(), "Sending pose1");
 		  

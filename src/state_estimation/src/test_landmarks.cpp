@@ -1,3 +1,4 @@
+
 #include "rclcpp/rclcpp.hpp"
 
 #include <chrono>
@@ -10,6 +11,10 @@
 #include <map>
 #include <vector>
 #include <random>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/exceptions.h>
 
 #include "message_filters/subscriber.hpp"
 #include "message_filters/synchronizer.hpp"
@@ -17,6 +22,7 @@
 
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 /*#include geometry_msgs/msg/pose_with_covariance_stamped.hpp*/
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -27,7 +33,6 @@
 using namespace std::chrono_literals;
 using std::placeholders::_1;
 using std::placeholders::_2;
-//using std::placeholders::_3;
 
 struct Landmark { // data structure for landmarks
   double x;
@@ -44,19 +49,14 @@ struct MatchedObservation{
 
 class KalmanFilter : public rclcpp::Node{
   public:
-	KalmanFilter() : Node("ekf"){
+	KalmanFilter() : Node("test_landmarks"), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_) {
 	  rclcpp::QoS qos = rclcpp::QoS(10);
 
-//	  cmd_vel_sub_.subscribe(this, "cmd_vel", qos.get_rmw_qos_profile());
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  scan_sub_.subscribe(this, "scan", qos.get_rmw_qos_profile());
-//	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped("pose_ekf", 10);
-//	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
-//	  pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
-//	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
-//	  tb4_ekf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_path", 10); // initialize tb4 ekf filter path publisher
 	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("clusters", 10); // cluster publisher (for debugging)
 	  detected_points_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("detected_points", 10); // initialize detected corner publisher (for debugging)	  
+	  landmark_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("landmarks", 10);
 	  match_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("matches", 10); // initialize detected matches publisher (for debugging)	
 //  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
 //	  accumulated_path_.header.frame_id = "map";	  
@@ -70,35 +70,28 @@ class KalmanFilter : public rclcpp::Node{
 
   private:
 	void syncCallback(const nav_msgs::msg::Odometry::ConstSharedPtr & odom, const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan){
-	  //RCLCPP_INFO(this->get_logger(), "odom_time: %d, %u, scan_time: %d, %u", odom->header.stamp.sec, odom->header.stamp.nanosec, scan->header.stamp.sec, odom->header.stamp.nanosec); // debugging
-	  double odom_l = odom->twist.twist.linear.x;
-	  double odom_a = odom->twist.twist.angular.z;
+	  RCLCPP_INFO(this->get_logger(), "odom_x %f", odom->pose.pose.position.x); // debugging
+//	  double odom_x = odom->pose.pose.position.x;
+//	  double odom_y = odom->pose.pose.position.y;
+//	  double odom_z = odom->pose.pose.orientation.w;
 	  Eigen::Vector3d State_bar_;
 	  Eigen::Matrix3d Sigma_bar_;
 	  std::vector<MatchedObservation> Matched_Set_;
+	  std::string lidar_frame = scan->header.frame_id;
+	  geometry_msgs::msg::TransformStamped transform_stamped;
 
-	  double w = odom->pose.pose.orientation.w; //populate robot state from odom data (in case ekf starts not at beginning of sim)
-	  double x = odom->pose.pose.orientation.x;
-	  double y = odom->pose.pose.orientation.y;
-	  double z = odom->pose.pose.orientation.z;
-	  double siny_cosp = 2 * (w * z + x * y);
-	  double cosy_cosp = 1 - 2 * (y * y + z * z);
-	  State_(0) = odom->pose.pose.position.x; 
-	  State_(1) = odom->pose.pose.position.y;
-	  State_(2) = atan2(siny_cosp, cosy_cosp);
-
-	  State_ = pose_expected_t(odom_l, odom_a);	// predict tb4 state by applying motion model
-	  //RCLCPP_INFO(this->get_logger(), "expectedx: %f, theta: %f", State_(0), State_(2)); // debugging
-	  Sigma_bar_ = covariance_t(odom_l);	// incorporate process noise into covariance matrix
+	  State_ << 0.0, 0.0, 0.0;	// predict tb4 state by applying motion model
+	  RCLCPP_INFO(this->get_logger(), "expectedx: %f, theta: %f", State_(0), State_(2)); // debugging
+	  Sigma_bar_ = covariance_t(0.0);	// incorporate process noise into covariance matrix
 	  extract_scan_(*scan);
-	  associate_landmarks_(Known_Landmarks_, Endpoints_, State_, Sigma_bar_, R_);
+
+	  associate_landmarks_(Known_Landmarks_, Endpoints_, State_, Sigma_bar_, Q_);
 	}
 
-	void associate_landmarks_(const std::vector<Landmark> & Known_Landmarks_, const std::vector<std::vector<Eigen::Vector2d>> & endpoints, const Eigen::Vector3d & robot_state, const Eigen::Matrix3d & covariance, const Eigen::Matrix2d & measurement_noise){
+	void associate_landmarks_(const std::vector<Landmark> & Known_Landmarks_, const std::vector<std::vector<Eigen::Vector2d>> & endpoints, const Eigen::Vector3d & robot_state, const Eigen::Matrix3d & covariance, const Eigen::Matrix2d & process_noise){
 	  int best_match;
 	  double best_distance, dx, dy, dtheta, q, distance;
-      	  double CHI_GATE_THRESHOLD = 4.6; // for mahalanobis gating (in range/bearing frame)
-	  double CARTESIAN_GATE = 0.4; // for range independent tolerance gating
+      	  double CHI_GATE_THRESHOLD = 1.1; // for mahalanobis gating
 	  Eigen::MatrixXd best_S_inv, best_nu, best_H; // matrices
 	  Eigen::Vector2d delta, zed_hat, zed;
 	  std::vector<MatchedObservation> matched_set;
@@ -121,14 +114,12 @@ class KalmanFilter : public rclcpp::Node{
 				q = delta.transpose() * delta;
 				zed_hat << std::sqrt(q), dtheta; // predicted range, bearing
 				zed << std::sqrt(endpoints[i][j].x() * endpoints[i][j].x() + endpoints[i][j].y() * endpoints[i][j].y()), atan2(endpoints[i][j].y(), endpoints[i][j].x()); // measured ranged, bearing
-				Eigen::Vector2d landmark_pred_cartesian(zed_hat(0) * cos(zed_hat(1)), zed_hat(0) * sin(zed_hat(1)));
-				double cart_dist = (endpoints[i][j] - landmark_pred_cartesian).norm();
 				Eigen::Matrix<double, 2, 3> H = Jacobian_(q, dx, dy);
-				Eigen::Matrix2d S_inv = (H * covariance * H.transpose() + measurement_noise).inverse();
+				Eigen::Matrix2d S_inv = (H * covariance * H.transpose() + process_noise).inverse();
 				Eigen::Vector2d Innovation = zed - zed_hat;
 				Innovation.y() = atan2(sin(Innovation.y()), cos(Innovation.y())); // bearing wrap
 				distance = Innovation.transpose() * S_inv * Innovation; // Mahalanobis distance
-				if (distance < best_distance && cart_dist < CARTESIAN_GATE){ // nearest neighbour + cartesian gating
+				if (distance < best_distance){ // nearest neighbour gating
 					best_match = k + 1;
 					best_distance = distance;
 					best_S_inv = S_inv;
@@ -140,14 +131,13 @@ class KalmanFilter : public rclcpp::Node{
 				matched_set.push_back(MatchedObservation{endpoints[i][j], best_match - 1, best_S_inv, best_nu, best_H});
 				RCLCPP_INFO(this->get_logger(), "landmark %i matched to x: %f, y: %f \n", best_match - 1 , endpoints[i][j].x(), endpoints[i][j].y()); // debugging
 			}
-			else{
-//				RCLCPP_INFO(this->get_logger(), "no matches");
-			}				
-			
 		}
 	  }
 	  for (const auto & match : matched_set){ // debugging matches
 		  publishMatches(match.matched_point, "base_link", this->now());
+	  }
+	  for (const auto& landmark : Known_Landmarks_){
+		  publishKnownLandmarks(landmark.x, landmark.y, "base_link", this->now());
 	  }
 	}
 
@@ -166,19 +156,19 @@ class KalmanFilter : public rclcpp::Node{
 	Eigen::Vector3d pose_expected_t(const double & linear_vel, const double & angular_vel){
 	  Eigen::Vector3d tb4_expected;
 
-	// RCLCPP_INFO(this->get_logger(), "received linear odom: %f, angular odom: %f, state_x: %f, state_theta: %f", linear_vel, angular_vel, State_(0), State_(2)); // debugging
+	  RCLCPP_INFO(this->get_logger(), "received linear cmd_vel: %f, angular cmd_vel: %f, state_x: %f, state_theta: %f", linear_vel, angular_vel, State_(0), State_(2));
 
-	  tb4_expected(0) = State_(0) + linear_vel * cos(State_(2)) * 0.1;
-	  tb4_expected(1) = State_(1) + linear_vel * sin(State_(2)) * 0.1;
-	  tb4_expected(2) = State_(2) + angular_vel * 0.1;
+	  tb4_expected(0) = State_(0) + linear_vel * cos(State_(2)) * 0.05;
+	  tb4_expected(1) = State_(1) + linear_vel * sin(State_(2)) * 0.05;
+	  tb4_expected(2) = State_(2) + angular_vel * 0.05;
 	  return tb4_expected;
 	}
 
 	Eigen::Matrix3d covariance_t(const double & linear_vel){
 	  Eigen::Matrix3d tb4_covariance_expected;
-	  G_(0,2) = -linear_vel*sin(State_(2)) * 0.1;
-	  G_(1,2) = linear_vel*cos(State_(2)) * 0.1;
-	  tb4_covariance_expected = G_ * Sigma_ * G_.transpose() + Q_;
+	  G_(0,2) = -linear_vel*sin(State_(2)) * 0.05;
+	  G_(1,2) = linear_vel*cos(State_(2)) * 0.05;
+	  tb4_covariance_expected = G_ * Sigma_ * G_.transpose() + R_;
 	  return tb4_covariance_expected;
 	}
 
@@ -196,15 +186,15 @@ class KalmanFilter : public rclcpp::Node{
 		}
 
 		double angle = scan.angle_min + ( i * scan.angle_increment); // calculate beam angle in tb4 coordinate frame
-		double x_lidar = range * cos(angle); // covert to cartesian coordinates in tb4 rplidar coordinate frame
+		double x_lidar = range * cos(angle); // covert to cartesian coordinates in tb4 coordinate frame
 		double y_lidar = range * sin(angle);
-		double x_base = -y_lidar - 0.04; // convert to base_link 
+		double x_base = -y_lidar - 0.04;
 		double y_base = x_lidar;
 		//RCLCPP_INFO(this->get_logger(), "x: %f, y: %f \n", x_base, y_base);		
 		local_points.push_back(Eigen::Vector2d(x_base, y_base));
 	  }
 	  
-//	  RCLCPP_INFO(this->get_logger(), "processed %zu points out of %zu beams", local_points.size(), scan.ranges.size());
+	  RCLCPP_INFO(this->get_logger(), "processed %zu points out of %zu beams", local_points.size(), scan.ranges.size());
 
 	  if (!local_points.empty()){
 		Clusters_ = extract_clusters_(local_points);
@@ -213,14 +203,14 @@ class KalmanFilter : public rclcpp::Node{
 	  }
 
 	  else {
-		//RCLCPP_INFO(this->get_logger(), "no scan results");
+		RCLCPP_INFO(this->get_logger(), "no scan results");
 	  }
 	}
 
 	// sort points into clusters and then segment each cluster's endpoints
 	std::vector<std::vector<Eigen::Vector2d>> extract_clusters_(const std::vector<Eigen::Vector2d> & points){
-	  double max_gap = 0.1;
-	  double max_distance = 3.0; 
+	  double max_gap = 0.2;
+	  double max_distance = 333.0;
 	  std::vector<std::vector<Eigen::Vector2d>> clusters;
 	  std::vector<Eigen::Vector2d> current;
 
@@ -228,7 +218,7 @@ class KalmanFilter : public rclcpp::Node{
 	  for (size_t i = 1; i < points.size(); i++){
 		if ((points[i] - points[i-1]).norm() > max_gap){
 			if (current.size() >= 10){ // discard small clusters dissimilar to pallet corners
-			       	clusters.push_back(current);			
+			       	clusters.push_back(current);
 			}
 			current.clear();
 		}
@@ -266,7 +256,7 @@ class KalmanFilter : public rclcpp::Node{
 		}
 	  }
 
-//	  RCLCPP_INFO(this->get_logger(), "%zu valid clusters found, %zu endpoints found", clusters.size(), Endpoints_.size());
+	  RCLCPP_INFO(this->get_logger(), "%zu valid clusters found, %zu endpoints found", clusters.size(), Endpoints_.size());
 
 	  return clusters;
 	}
@@ -392,6 +382,31 @@ class KalmanFilter : public rclcpp::Node{
 	  match_publisher_->publish(marker);
 	}
 
+	// debugging for known landmark readings
+	void publishKnownLandmarks(const double landmark_x, const double landmark_y, const std::string & frame_id, rclcpp::Time stamp){
+	  visualization_msgs::msg::Marker marker;
+	  
+	  marker.header.frame_id = frame_id;
+	  marker.header.stamp = stamp;
+	  marker.ns = "landmarks";
+	  marker.id = 0;
+	  marker.type = visualization_msgs::msg::Marker::POINTS;
+	  marker.action = visualization_msgs::msg::Marker::ADD;
+	  marker.scale.x = 0.5;
+	  marker.scale.y = 0.5;
+	  marker.color.r = 0.0f;
+	  marker.color.g = 0.5f;
+	  marker.color.b = 1.0f;
+	  marker.color.a = 1.0f;
+	  geometry_msgs::msg::Point p;
+	  p.x = landmark_x;
+	  p.y = landmark_y;
+	  p.z = 0.0;
+	  marker.points.push_back(p);
+	  
+	  landmark_publisher_->publish(marker);
+	}
+
 /*	Eigen::Matrix3d kalman_gain_t(Eigen::Matrix3d & expected_covariance){
 	  Eigen::Matrix3d kg_t;
 
@@ -457,11 +472,14 @@ class KalmanFilter : public rclcpp::Node{
 	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_ekf_path_;*/
 
+	tf2_ros::Buffer tf_buffer_;
+	tf2_ros::TransformListener tf_listener_;
 /*	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekf_path_publisher_;*/
 	rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr detected_points_publisher_;
 	rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_publisher_;
 	rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr match_publisher_;
+	rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr landmark_publisher_;
 	message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
 	message_filters::Subscriber<sensor_msgs::msg::LaserScan> scan_sub_;
 //	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_;
@@ -471,10 +489,10 @@ class KalmanFilter : public rclcpp::Node{
 /*	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3) * 0.05; // message filter syncing cmd_vel msgs elapses approximately 50 ms btw msgs
 	Eigen::Matrix3d C_ = Eigen::Matrix3d::Identity(3, 3);*/
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 0); // initialize robot state vector at time = 0
-	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to one since tb4's state is known at t = 0
+	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.0001; // initialize starting covariance to one since tb4's state is known at t = 0
 
-	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.01 ; // measurement noise value
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.03; // process noise value
+	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.00005 ; // measurement noise value
+	Eigen::Matrix2d Q_ = Eigen::Matrix2d::Identity(2, 2) * 0.01; // process noise value
 
 	std::vector<std::vector<Eigen::Vector2d>> Clusters_;
 	std::vector<std::vector<Eigen::Vector2d>> Endpoints_;
@@ -485,6 +503,7 @@ class KalmanFilter : public rclcpp::Node{
 	  {11.8, -1.78},
 	  {17.2, -1.65},
 	};
+	std::vector<Landmark> Landmarks_tb4_;
 };
 
 int main (int argc, char ** argv){

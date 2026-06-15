@@ -13,6 +13,9 @@ find_package(nav2_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
@@ -30,9 +33,12 @@ ament_export_dependencies(eigen3_cmake_module)
 ament_export_dependencies(Eigen3)
 
 add_executable(ekf src/ekf.cpp)
-ament_target_dependencies(ekf rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs visualization_msgs Eigen3 message_filters)
+ament_target_dependencies(ekf rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-install(TARGETS test_trajectory kf ekf
+add_executable(test_landmarks src/test_landmarks.cpp)
+ament_target_dependencies(test_landmarks rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+
+install(TARGETS test_trajectory kf ekf test_landmarks
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
