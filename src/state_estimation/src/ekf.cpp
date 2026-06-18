@@ -14,7 +14,7 @@
 #include "message_filters/subscriber.hpp"
 #include "message_filters/synchronizer.hpp"
 #include "message_filters/sync_policies/approximate_time.hpp"
-
+//#include "std_msgs/msg/float32.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
 /*#include geometry_msgs/msg/pose_with_covariance_stamped.hpp*/
@@ -56,6 +56,7 @@ class KalmanFilter : public rclcpp::Node{
 	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_ekf_nl_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_nl_path", 10); // initialize tb4 ekf (no landmark localization) path publisher
 	  tb4_ekf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_path", 10); // initialize tb4 ekf path publisher
+	  //kt_publisher_ = this->create_publisher<std_msgs::msg::Float32>("kt", 10); // initialize kalman gain publisher
 	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("clusters", 10); // cluster publisher (for debugging)
 	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("clusters", 10); // cluster publisher (for debugging)
 	  detected_points_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("detected_points", 10); // initialize detected corner publisher (for debugging)	  
@@ -490,7 +491,7 @@ class KalmanFilter : public rclcpp::Node{
 	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_ekf_path_;
 	nav_msgs::msg::Path accumulated_ekf_nl_path_;
-
+//	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekf_nl_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekf_path_publisher_;
@@ -506,8 +507,8 @@ class KalmanFilter : public rclcpp::Node{
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 0); // initialize robot state vector at time = 0
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to one since tb4's state is known at t = 0
 
-	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.01 ; // measurement noise value
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.03; // process noise value
+	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.005 ; // measurement noise value
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.06; // process noise value
 
 	std::vector<std::vector<Eigen::Vector2d>> Clusters_;
 	std::vector<std::vector<Eigen::Vector2d>> Endpoints_;

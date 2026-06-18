@@ -9,7 +9,7 @@
 #include "message_filters/subscriber.hpp"
 #include "message_filters/synchronizer.hpp"
 #include "message_filters/sync_policies/approximate_time.hpp"
-
+#include "std_msgs/msg/float32.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
 /*#include geometry_msgs/msg/pose_with_covariance_stamped.hpp*/
@@ -27,6 +27,7 @@ class KalmanFilter : public rclcpp::Node{
 
 	  cmd_vel_sub_.subscribe(this, "cmd_vel", qos.get_rmw_qos_profile());
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
+	  kt_publisher_ = this->create_publisher<std_msgs::msg::Float32>("kt", 10);
 //	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped("pose_kf", 10);
 	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
 //	  pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
@@ -63,6 +64,11 @@ class KalmanFilter : public rclcpp::Node{
 	  Sigma_ = covariance_updated_t(Kalman_gain_, Sigma_bar_); // corrected state covariance matrix
 
 	  RCLCPP_INFO(this->get_logger(), "expectedx: %f, y: %f, theta: %f, pose x: %f, y: %f, theta: %f, covariance 1: %f, 2: %f, 3: %f", State_bar_(0), State_bar_(1), State_bar_(2), State_(0), State_(1), State_(2), Sigma_(0,0), Sigma_(1,1), Sigma_(2,2)); // debugging
+	  // kalman gain publisher
+	  double kt = Kalman_gain_(0,0);
+	  std_msgs::msg::Float32 kt_msg;
+	  kt_msg.data = kt;
+	  kt_publisher_->publish(kt_msg);
 
 	  // temporary pose publisher for testing. will comment out in favour of posestampedwithcovariance msg pub
 	  geometry_msgs::msg::PoseStamped pose_msg;
@@ -153,7 +159,7 @@ class KalmanFilter : public rclcpp::Node{
 
 	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_kf_path_;
-
+	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_kf_path_publisher_;
 //	rclcpp::Publisher<geometry_msgs::msg::PoseStampedWithCovariance>::SharedPtr pose_publisher_;
@@ -167,7 +173,7 @@ class KalmanFilter : public rclcpp::Node{
 	Eigen::Matrix3d C_ = Eigen::Matrix3d::Identity(3, 3);
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 1); // initialize robot state vector at time = 0
 	Eigen::Vector3d Control_ = Eigen::Vector3d(0, 0, 0); // initialize control vector at time = 0						   
-	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3); // initialize starting covariance to one since tb4's state is known at t = 0
+	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.001 ; // initialize starting covariance to one since tb4's state is known at t = 0
 
 	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.03 ; // initial test value
 	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initial test value
