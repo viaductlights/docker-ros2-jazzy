@@ -22,8 +22,14 @@ find_package(message_filters REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-add_executable(test_trajectory src/test_trajectory.cpp)
-ament_target_dependencies(test_trajectory rclcpp geometry_msgs nav2_msgs rclcpp_action)
+add_executable(test_trajectory_1 src/test_trajectory_1.cpp)
+ament_target_dependencies(test_trajectory_1 rclcpp geometry_msgs nav2_msgs rclcpp_action)
+
+add_executable(test_trajectory_2 src/test_trajectory_2.cpp)
+ament_target_dependencies(test_trajectory_2 rclcpp geometry_msgs nav2_msgs rclcpp_action)
+
+add_executable(test_trajectory_3 src/test_trajectory_3.cpp)
+ament_target_dependencies(test_trajectory_3 rclcpp geometry_msgs nav2_msgs rclcpp_action)
 
 include_directories(include ${EIGEN3_INCLUDE_DIRS})
 
@@ -36,16 +42,25 @@ ament_target_dependencies(kf rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs tf
 add_executable(kf_wrong_quat src/kf_wrong_quat.cpp)
 ament_target_dependencies(kf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs Eigen3 message_filters)
 
+add_executable(ekf_odom src/ekf_odom.cpp)
+ament_target_dependencies(ekf_odom rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+
 add_executable(ekf src/ekf.cpp)
 ament_target_dependencies(ekf rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
 add_executable(ekf_wrong_quat src/ekf_wrong_quat.cpp)
 ament_target_dependencies(ekf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs visualization_msgs Eigen3 message_filters)
 
+add_executable(ekf_improved src/ekf_improved.cpp)
+ament_target_dependencies(ekf_improved rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+
+add_executable(pf src/pf.cpp)
+ament_target_dependencies(pf rclcpp geometry_msgs sensor_msgs nav_msgs nav2_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3)
+
 add_executable(test_landmarks src/test_landmarks.cpp)
 ament_target_dependencies(test_landmarks rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-install(TARGETS test_trajectory kf ekf test_landmarks kf_wrong_quat ekf_wrong_quat
+install(TARGETS test_trajectory_1 test_trajectory_2 test_trajectory_3 kf ekf test_landmarks kf_wrong_quat ekf_odom ekf_wrong_quat ekf_improved pf
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin

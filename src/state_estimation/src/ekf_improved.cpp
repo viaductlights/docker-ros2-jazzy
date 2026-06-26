@@ -3,9 +3,10 @@
 #include <chrono>
 #include <memory>
 #include <functional>
-//#include <sstream>
 #include <Eigen/Dense>
 #include <Eigen/StdVector>
+#include <Eigen/Eigenvalues>
+#include <algorithm>
 #include <math.h>
 #include <map>
 #include <vector>
@@ -17,7 +18,7 @@
 //#include "std_msgs/msg/float32.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
-/*#include geometry_msgs/msg/pose_with_covariance_stamped.hpp*/
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
@@ -44,32 +45,37 @@ struct MatchedObservation{
   Eigen::MatrixXd H; // 2x3
 };
 
-class KalmanFilter : public rclcpp::Node{
+struct LineSegment {
+    Eigen::Vector2d centroid;
+    Eigen::Vector2d dir;     // Normalized direction vector of the line
+    Eigen::Vector2d p_start; // Projected start point on the line
+    Eigen::Vector2d p_end;   // Projected end point on the line
+    int num_points;
+};
+
+class ImprovedExtendedKalmanFilter : public rclcpp::Node{
   public:
-	KalmanFilter() : Node("ekf"){
+	ImprovedExtendedKalmanFilter() : Node("ekfi"){
 	  rclcpp::QoS qos = rclcpp::QoS(10);
 
 	  cmd_vel_sub_.subscribe(this, "cmd_vel", qos.get_rmw_qos_profile());
 	  //odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  scan_sub_.subscribe(this, "scan", qos.get_rmw_qos_profile());
-	  //pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped("pose_ekf", 10);
-	  //tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
+	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_ekfi", 10);
+	  //tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&ImprovedExtendedKalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
 	  //pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
-	  //tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
-	  tb4_ekf_nl_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_nl_path", 10); // initialize tb4 ekf (no landmark localization) path publisher
-	  tb4_ekf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_path", 10); // initialize tb4 ekf path publisher
-	  //kt_publisher_ = this->create_publisher<std_msgs::msg::Float32>("kt", 10); // initialize kalman gain publisher
+//	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
+	  tb4_ekfi_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekfi_path", 10); // initialize tb4 ekf path publisher
 	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("clusters", 10); // cluster publisher (for debugging)
 	  detected_points_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("detected_points", 10); // initialize detected corner publisher (for debugging)	  
 	  match_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("matches", 10); // initialize detected matches publisher (for debugging)	
   	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
-	  accumulated_path_.header.frame_id = "map";	  
 	  
 	  uint32_t queue_size = 10;
 	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, sensor_msgs::msg::LaserScan>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, sensor_msgs::msg::LaserScan>(queue_size), cmd_vel_sub_, scan_sub_); // initialize approximate time message filter for odom and scan msgs
 	  
 	  sync->setAgePenalty(0.50);
-	  sync->registerCallback(std::bind(&KalmanFilter::syncCallback, this, _1, _2)); // sync callback for message filter
+	  sync->registerCallback(std::bind(&ImprovedExtendedKalmanFilter::syncCallback, this, _1, _2)); // sync callback for message filter
 	  }
 
   private:
@@ -91,22 +97,9 @@ class KalmanFilter : public rclcpp::Node{
 	  if (dt <= 0.0) dt = 0.1;
 
 	  State_ = pose_expected_t(State_, vel_l, vel_a, dt);	// predict tb4 state by applying motion model
-	  State_nl_ = pose_expected_t(State_nl_, vel_l, vel_a, dt);	// pure dead-reckoning baseline; never touched by the correction loop below
 	  //RCLCPP_INFO(this->get_logger(), "expectedx: %f, theta: %f", State_(0), State_(2)); // debugging
 	  Sigma_bar_ = covariance_t(vel_l, dt);	// incorporate process noise into covariance matrix
 	  
-	  geometry_msgs::msg::PoseStamped pose_msg; // dead-reckoning-only path (no landmark correction ever applied), for comparison against the corrected path
-          pose_msg.header.stamp = this->now();
-          pose_msg.header.frame_id = "map";
-          pose_msg.pose.position.x = State_nl_(0);
-          pose_msg.pose.position.y = State_nl_(1);
-
-	  // quaternion conversion
-	  tf2::Quaternion q_pure;
-	  q_pure.setRPY(0, 0, State_nl_(2));
-          pose_msg.pose.orientation = tf2::toMsg(q_pure);
-          publish_pose_t(pose_msg);
-
 	  extract_scan_(*scan);
 	  Matched_Set_ = associate_landmarks_(Known_Landmarks_, Endpoints_, State_, Sigma_bar_, R_);
 	  for (const auto & match : Matched_Set_){
@@ -126,7 +119,9 @@ class KalmanFilter : public rclcpp::Node{
 
 	  Sigma_ = Sigma_bar_; // corrected covariance
 
-	  geometry_msgs::msg::PoseStamped pose_msg_l; // temp tb4 state estimation publisher for testing. comment out later
+	  publish_pose_covariance(); // publishes to /pose_ekfi
+
+	  geometry_msgs::msg::PoseStamped pose_msg_l; // tb4 state estimation path publisher for visualization
           pose_msg_l.header.stamp = this->now();
           pose_msg_l.header.frame_id = "map";
           pose_msg_l.pose.position.x = State_(0);
@@ -135,7 +130,7 @@ class KalmanFilter : public rclcpp::Node{
 	  tf2::Quaternion q_corrected;
 	  q_corrected.setRPY(0, 0, State_(2)); // was never set before — left q_corrected uninitialized
           pose_msg_l.pose.orientation = tf2::toMsg(q_corrected);
-          publish_pose_l_t(pose_msg_l);
+          publish_path_l_t(pose_msg_l);
 	}
 
 	std::vector<MatchedObservation> associate_landmarks_(const std::vector<Landmark> & Known_Landmarks_, const std::vector<std::vector<Eigen::Vector2d>> & endpoints, const Eigen::Vector3d & robot_state, const Eigen::Matrix3d & covariance, const Eigen::Matrix2d & measurement_noise){
@@ -247,8 +242,6 @@ class KalmanFilter : public rclcpp::Node{
 	}
 
 	// helper functions for ekf algo
-	// takes the previous state explicitly so it can be reused for both the corrected
-	// state and an independent dead-reckoning-only state (see State_nl_ below)
 	Eigen::Vector3d pose_expected_t(const Eigen::Vector3d & prev_state, const double & linear_vel, const double & angular_vel, const double & time_step){
 	  Eigen::Vector3d tb4_expected;
 
@@ -304,10 +297,95 @@ class KalmanFilter : public rclcpp::Node{
 	  }
 	}
 
+
+	 // Recursive Split and Merge (Iterative End-Point Fit)
+	void splitAndMerge(const std::vector<Eigen::Vector2d>& cluster, int start, int end, double threshold, std::vector<std::vector<Eigen::Vector2d>>& segments) {
+    	  if (end - start < 3) { // Minimum points required to form a line segment
+        	std::vector<Eigen::Vector2d> seg(cluster.begin() + start, cluster.begin() + end + 1);
+        	segments.push_back(seg);
+          	return;
+    	  }
+
+	  Eigen::Vector2d p1 = cluster[start];
+	  Eigen::Vector2d p2 = cluster[end];
+    	  double max_dist = 0.0;
+    	  int split_index = start;
+
+    	  double denom = (p2 - p1).norm();
+    	  if (denom < 1e-5) {
+        	for (int i = start + 1; i < end; ++i) { // Edge case: start and end points are essentially identical
+			double d = (cluster[i] - p1).norm();
+			if (d > max_dist) { max_dist = d; split_index = i; }
+        	}
+	  }
+	  else {
+        	for (int i = start + 1; i < end; ++i) { // Calculate orthogonal distance from point to the line spanning p1 -> p2
+        		double num = std::abs((p2.x() - p1.x()) * (p1.y() - cluster[i].y()) - (p1.x() - cluster[i].x()) * (p2.y() - p1.y()));
+            		double d = num / denom;
+            		if (d > max_dist) { max_dist = d; split_index = i; }
+        	}
+    	  }
+
+    	  if (max_dist > threshold) {
+        	splitAndMerge(cluster, start, split_index, threshold, segments);  // Split the cluster at the point of maximum deviation
+        	splitAndMerge(cluster, split_index, end, threshold, segments); 
+    	  } 
+	  else {
+        	std::vector<Eigen::Vector2d> seg(cluster.begin() + start, cluster.begin() + end + 1); // Cluster is linear enough; save as a segment
+        	segments.push_back(seg);
+    	   }
+	}
+
+	// Total Least Squares Line Fitting (Orthogonal Distance Regression via PCA)
+	LineSegment fitLine(const std::vector<Eigen::Vector2d>& points) {
+    	  LineSegment ls;
+	  ls.num_points = points.size();
+	  ls.centroid = Eigen::Vector2d::Zero();
+    
+    	  for (const auto& p : points) {
+        	ls.centroid += p;
+	  }
+	  ls.centroid /= points.size();
+
+	  // Compute covariance matrix
+    	  Eigen::Matrix2d cov = Eigen::Matrix2d::Zero();
+    	  for (const auto& p : points) {
+        	Eigen::Vector2d diff = p - ls.centroid;
+        	cov += diff * diff.transpose();
+    	  }
+
+    	  // Solve for eigenvalues. The eigenvector for the largest eigenvalue is the principal direction
+   	  Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> solver(cov);
+    	  ls.dir = solver.eigenvectors().col(1); 
+
+    	  // Project raw extremities orthogonally onto the fitted line
+	  Eigen::Vector2d start_diff = points.front() - ls.centroid;
+    	  Eigen::Vector2d end_diff = points.back() - ls.centroid;
+    	  ls.p_start = ls.centroid + start_diff.dot(ls.dir) * ls.dir;
+    	  ls.p_end = ls.centroid + end_diff.dot(ls.dir) * ls.dir;
+
+    	  return ls;
+	}
+
+	// Mathematical Line-Line Intersection
+	bool intersectLines(const LineSegment& l1, const LineSegment& l2, Eigen::Vector2d& intersection) {
+	  Eigen::Matrix2d A;
+	  A << l1.dir.x(), -l2.dir.x(),
+          l1.dir.y(), -l2.dir.y();
+         
+    	  if (std::abs(A.determinant()) < 1e-4) return false; // Lines are parallel
+
+    	  Eigen::Vector2d b = l2.centroid - l1.centroid;
+    	  Eigen::Vector2d t = A.inverse() * b;
+    
+    	  intersection = l1.centroid + t(0) * l1.dir;
+    	  return true;
+	}
+	
 	// sort points into clusters and then segment each cluster's endpoints
 	std::vector<std::vector<Eigen::Vector2d>> extract_clusters_(const std::vector<Eigen::Vector2d> & points){
 	  double max_gap = 0.1;
-	  double max_distance = 3.0; 
+	  //double max_distance = 3.0; 
 	  std::vector<std::vector<Eigen::Vector2d>> clusters;
 	  std::vector<Eigen::Vector2d> current;
 
@@ -335,34 +413,61 @@ class KalmanFilter : public rclcpp::Node{
 		}
 	  }
 
-	 Endpoints_.clear();
+	  Endpoints_.clear();
 
-	 for (const auto& cluster : clusters){ // extract endpoints of cluster segments
-		 if (cluster.empty()){
-			 Endpoints_.push_back({Eigen::Vector2d::Zero(), Eigen::Vector2d::Zero()});
-		 }
-		 else{
-			 Endpoints_.push_back({cluster.front(), cluster.back()});
-		 }
-	 }
+	  double split_threshold = 0.05;
+	  
+	  for (const auto& cluster : clusters){ // feature extraction: split and merge + pca intersection
+		 if (cluster.empty()) continue;
+		 std::vector<std::vector<Eigen::Vector2d>> raw_segments;
+		 splitAndMerge(cluster, 0, cluster.size() - 1, split_threshold, raw_segments);
+		 
+		 std::vector<LineSegment> fitted_segments;
+          	for (const auto& raw_seg : raw_segments) {
+            		if (raw_seg.size() >= 3) { // Require at least 3 points to confidently fit a line
+                		fitted_segments.push_back(fitLine(raw_seg));
+            		}
+          	}
 
-	  for (size_t j = Endpoints_.size(); j-- > 0;) { // discard long segments dissimilar to pallet corners
-		if (too_long_(Endpoints_[j], max_distance)) {
-			Endpoints_.erase(Endpoints_.begin() + j);
-			clusters.erase(clusters.begin() + j);
-		}
-	  }
+          	std::vector<Eigen::Vector2d> cluster_features;
 
-//	  RCLCPP_INFO(this->get_logger(), "%zu valid clusters found, %zu endpoints found", clusters.size(), Endpoints_.size());
+          	if (fitted_segments.empty()) {
+          		// Fallback: Use raw endpoints if the cluster was too small to fit lines
+            		cluster_features.push_back(cluster.front());
+            		cluster_features.push_back(cluster.back());
+          	}
+          	else if (fitted_segments.size() == 1) {
+            		// Single straight face seen: Add the projected endpoints
+            		cluster_features.push_back(fitted_segments.front().p_start);
+            		cluster_features.push_back(fitted_segments.back().p_end);
+          	}
+          	else {
+            		// L-Shape seen: Intersect adjacent segments
+            		cluster_features.push_back(fitted_segments.front().p_start);
+
+            		for (size_t i = 0; i < fitted_segments.size() - 1; ++i) {
+                		Eigen::Vector2d intersection;
+                		if (intersectLines(fitted_segments[i], fitted_segments[i+1], intersection)) {
+
+                    			// Verify the angle is a sharp corner (ignoring PCA direction signs)
+                    			double dot = std::abs(fitted_segments[i].dir.dot(fitted_segments[i+1].dir));
+
+                    			// dot < 0.707 means the lines intersect at an angle > 45 degrees
+                    			if (dot < 0.707) {
+                        			cluster_features.push_back(intersection); // True robust corner!
+                    			} else {
+                        			// If it's essentially a straight line slightly bending, just append the seam
+                        			cluster_features.push_back(fitted_segments[i].p_end);
+                    			}
+                		}
+			}
+            	cluster_features.push_back(fitted_segments.back().p_end);
+          	} 
+
+          	Endpoints_.push_back(cluster_features);
+    	  }
 
 	  return clusters;
-	}
-
-	bool too_long_(const std::vector<Eigen::Vector2d> & segment, double max_distance) const {
-	  if (segment.size() < 2){
-		return false;
-	  }
-		return (segment[1] - segment[0]).norm() > max_distance;
 	}
 
 
@@ -479,22 +584,32 @@ class KalmanFilter : public rclcpp::Node{
 	  match_publisher_->publish(marker);
 	}
 
-	//temporary ekf path publisher for testing purposes. will comment out in favour of posestampedwithcovariance pub/sub
-	void publish_pose_t(const geometry_msgs::msg::PoseStamped & msg){
+	void publish_pose_covariance(){
+	  geometry_msgs::msg::PoseWithCovarianceStamped msg;
 
-	  geometry_msgs::msg::PoseStamped current_pose_stamped;
-	  current_pose_stamped.header.stamp = msg.header.stamp;
-	  current_pose_stamped.header.frame_id = "base_link";
-	  current_pose_stamped.pose = msg.pose;
+          msg.header.stamp = this->now();
+          msg.header.frame_id = "map";
+          msg.pose.pose.position.x = State_(0);
+          msg.pose.pose.position.y = State_(1);
+          
+          tf2::Quaternion q;
+          q.setRPY(0,0,State_(2));
 
-	  accumulated_ekf_nl_path_.header.stamp = this->now();
-	  accumulated_ekf_nl_path_.header.frame_id = "map";
-	  accumulated_ekf_nl_path_.poses.push_back(current_pose_stamped);
+          msg.pose.pose.orientation = tf2::toMsg(q);
 
-	  tb4_ekf_nl_path_publisher_->publish(accumulated_ekf_nl_path_);
+          std::fill(
+                msg.pose.covariance.begin(),
+                msg.pose.covariance.end(),
+                0.0);
+
+          msg.pose.covariance[0]  = Sigma_(0,0);
+	  msg.pose.covariance[7]  = Sigma_(1,1);
+	  msg.pose.covariance[35] = Sigma_(2,2);
+
+	  pose_pub_->publish(msg);
 	}
 
-	void publish_pose_l_t(const geometry_msgs::msg::PoseStamped & msg){
+	void publish_path_l_t(const geometry_msgs::msg::PoseStamped & msg){
 
 	  geometry_msgs::msg::PoseStamped current_pose_l_stamped;
 	  current_pose_l_stamped.header.stamp = msg.header.stamp;
@@ -505,7 +620,7 @@ class KalmanFilter : public rclcpp::Node{
 	  accumulated_ekf_path_.header.frame_id = "map";
 	  accumulated_ekf_path_.poses.push_back(current_pose_l_stamped);
 
-	  tb4_ekf_path_publisher_->publish(accumulated_ekf_path_);
+	  tb4_ekfi_path_publisher_->publish(accumulated_ekf_path_);
 	}
 
 	// tb4 ground_truth path publisher for ekf testing purposes. will comment out in favour of ground_truth publisher in test_trajectory node
@@ -535,24 +650,20 @@ class KalmanFilter : public rclcpp::Node{
 	  tb4_gt_path_publisher_->publish(accumulated_path_);
 	}*/
 
-	nav_msgs::msg::Path accumulated_path_;
+//	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_ekf_path_;
-	nav_msgs::msg::Path accumulated_ekf_nl_path_;
-//	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
+	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
 //	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
-	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekf_nl_path_publisher_;
-	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekf_path_publisher_;
+	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekfi_path_publisher_;
 	rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr detected_points_publisher_;
 	rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_publisher_;
 	rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr match_publisher_;
 	message_filters::Subscriber<geometry_msgs::msg::TwistStamped> cmd_vel_sub_;
 	message_filters::Subscriber<sensor_msgs::msg::LaserScan> scan_sub_;
-//	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_;
 	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, sensor_msgs::msg::LaserScan>>> sync;
 
 	Eigen::Matrix3d G_ = Eigen::Matrix3d::Identity(3, 3);
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 0); // initialize robot state vector at time = 0
-	Eigen::Vector3d State_nl_ = Eigen::Vector3d(0, 0, 0); // pure dead-reckoning baseline (no landmark correction); predicted every cycle, never corrected
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to one since tb4's state is known at t = 0
 
 	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.005 ; // measurement noise value
@@ -571,7 +682,7 @@ class KalmanFilter : public rclcpp::Node{
 
 int main (int argc, char ** argv){
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<KalmanFilter>());
+  rclcpp::spin(std::make_shared<ImprovedExtendedKalmanFilter>());
   rclcpp::shutdown();
   return 0;
 }

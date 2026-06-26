@@ -1,4 +1,3 @@
-
 #include "rclcpp/rclcpp.hpp"
 
 #include <chrono>
@@ -13,7 +12,7 @@
 #include "std_msgs/msg/float32.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
-/*#include geometry_msgs/msg/pose_with_covariance_stamped.hpp*/
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 
@@ -22,17 +21,17 @@ using namespace std::chrono_literals;
 using std::placeholders::_1;
 using std::placeholders::_2;
 
-class KalmanFilter : public rclcpp::Node{
+class KalmanFilterQuatError : public rclcpp::Node{
   public:
-	KalmanFilter() : Node("kf"){
+	KalmanFilterQuatError() : Node("kfe"){
 	  rclcpp::QoS qos = rclcpp::QoS(10);
 
 	  cmd_vel_sub_.subscribe(this, "cmd_vel", qos.get_rmw_qos_profile());
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  kt_publisher_ = this->create_publisher<std_msgs::msg::Float32>("kt", 10);
-//	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped("pose_kf", 10);
-//	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
-//	  pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
+	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_kfe", 10);
+//	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilterQuatError::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
+//	  pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("tb4_stamped", 10);
 //	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_kf_noquat_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_kf_noquat_path", 10); // initialize tb4 kf filter path publisher
 	
@@ -43,7 +42,7 @@ class KalmanFilter : public rclcpp::Node{
 	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_); // initialize approximate time message filter for odom and cmd_vel msgs
 	  
 	  sync->setAgePenalty(0.50);
-	  sync->registerCallback(std::bind(&KalmanFilter::syncCallback, this, _1, _2)); // sync callback for message filter
+	  sync->registerCallback(std::bind(&KalmanFilterQuatError::syncCallback, this, _1, _2)); // sync callback for message filter
 	}
 
   private:
@@ -68,12 +67,14 @@ class KalmanFilter : public rclcpp::Node{
 
 	  State_bar_ = pose_expected_t(cv_l, cv_a, dt);	// predict tb4 state by applying motion model
 	  
-	
+
 	  Sigma_bar_ = covariance_t();	// incorporate process noise into covariance matrix
 	  Kalman_gain_ = kalman_gain_t(Sigma_bar_); // incorporate measurement noise, covariance for sensor correction
 	  State_ = pose_updated_t(State_bar_, Kalman_gain_, Sensor_data); // corrected tb4 state
 	  State_(2) = atan2(sin(State_(2)), cos(State_(2))); // normalize in case of drift beyond [-pi, pi]								  // 
 	  Sigma_ = covariance_updated_t(Kalman_gain_, Sigma_bar_); // corrected state covariance matrix
+
+	  publish_pose_covariance(); // publishes to /pose_kfe
 
 	  RCLCPP_INFO(this->get_logger(), "expectedx: %f, y: %f, theta: %f, pose x: %f, y: %f, theta: %f, covariance 1: %f, 2: %f, 3: %f", State_bar_(0), State_bar_(1), State_bar_(2), State_(0), State_(1), State_(2), Sigma_(0,0), Sigma_(1,1), Sigma_(2,2)); // debugging
 	  // kalman gain publisher
@@ -126,6 +127,27 @@ class KalmanFilter : public rclcpp::Node{
 	  covariance_corrected = (Eigen::Matrix3d::Identity(3,3) - kalman_gain * C_) * expected_covariance;
 	  return covariance_corrected;
 	}
+
+	void publish_pose_covariance(){
+          geometry_msgs::msg::PoseWithCovarianceStamped msg;
+
+          msg.header.stamp = this->now();
+          msg.header.frame_id = "map";
+          msg.pose.pose.position.x = State_(0);
+          msg.pose.pose.position.y = State_(1);
+          msg.pose.pose.orientation.w = State_(2); // wrong: yaw assigned directly to quaternion w component
+
+          std::fill(
+                msg.pose.covariance.begin(),
+                msg.pose.covariance.end(),
+                0.0);
+
+          msg.pose.covariance[0]  = Sigma_(0,0);
+          msg.pose.covariance[7]  = Sigma_(1,1);
+          msg.pose.covariance[35] = Sigma_(2,2);
+
+          pose_pub_->publish(msg);
+        }
 	
 	//temporary kf path publisher for testing purposes. will comment out in favour of posestampedwithcovariance pub/sub
 	void publish_pose_t(const geometry_msgs::msg::PoseStamped & msg){
@@ -141,11 +163,13 @@ class KalmanFilter : public rclcpp::Node{
 
 	  tb4_kf_noquat_path_publisher_->publish(accumulated_kf_path_);
 	}
+
 	bool initialized_ = false;
 	rclcpp::Time last_stamp_;
 
 	nav_msgs::msg::Path accumulated_kf_path_;
 	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
+	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_kf_noquat_path_publisher_;
 //	rclcpp::Publisher<geometry_msgs::msg::PoseStampedWithCovariance>::SharedPtr pose_publisher_;
 	message_filters::Subscriber<geometry_msgs::msg::TwistStamped> cmd_vel_sub_;
@@ -166,7 +190,7 @@ class KalmanFilter : public rclcpp::Node{
 
 int main (int argc, char ** argv){
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<KalmanFilter>());
+  rclcpp::spin(std::make_shared<KalmanFilterQuatError>());
   rclcpp::shutdown();
   return 0;
 }

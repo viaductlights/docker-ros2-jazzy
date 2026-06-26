@@ -161,12 +161,12 @@ def generate_launch_description():
     )
 
     declare_simulator_cmd = DeclareLaunchArgument(
-        'headless', default_value='True', description='Whether to execute gzclient)'
+        'headless', default_value='False', description='Whether to execute gzclient)' # patched - set to False for tb4_gt_publisher
     )
 
     declare_world_cmd = DeclareLaunchArgument(
         'world',
-        default_value=os.path.join(sim_dir, 'worlds', 'depot.sdf'),  # Try warehouse.sdf!
+        default_value=os.path.join(sim_dir, 'worlds', 'depot.sdf'),
         description='Full path to world model file to load',
     )
 
