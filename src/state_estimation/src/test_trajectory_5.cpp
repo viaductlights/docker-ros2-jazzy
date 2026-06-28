@@ -1,22 +1,25 @@
+
+
 #include <chrono>
 #include <memory>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "nav_msgs/msg/path.hpp"
-#include "nav2_msgs/action/navigate_through_poses.hpp"
+#include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
 using namespace std::chrono_literals;
 
-using NavigateThroughPoses = nav2_msgs::action::NavigateThroughPoses;
-using GoalHandleNavPoses   = rclcpp_action::ClientGoalHandle<NavigateThroughPoses>;
+using NavigateToPose = nav2_msgs::action::NavigateToPose;
+using GoalHandleNavToPose   = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
-// NavigateThroughPoses palnner - short trajectory
+// NavigateToPose planner - short trajectory
 
 // ---------------------------------------------------------------------------
 // Startup sequence
@@ -39,7 +42,7 @@ using GoalHandleNavPoses   = rclcpp_action::ClientGoalHandle<NavigateThroughPose
 //   [bridge] tb4_gt_pose_subscriber_->get_publisher_count() > 0
 //               gz-ros bridge is publishing /tb4_dynamic_pose
 //   [nav2]   action_client_->action_server_is_ready()
-//               NavigateThroughPoses action server is up
+//               NavigateToPose action server is up
 //
 // Important: all timers are create_wall_timer() so they fire on real
 // wall-clock time and are unaffected by sim time not yet flowing.
@@ -69,8 +72,8 @@ public:
         this->declare_parameter<int>("nav_goal_delay_ms", 5000);
         accumulated_path_.header.frame_id = "map";
 
-        action_client_ = rclcpp_action::create_client<NavigateThroughPoses>(
-            this, "navigate_through_poses");
+        action_client_ = rclcpp_action::create_client<NavigateToPose>(
+            this, "navigate_to_pose");
 
         // ── begin readiness polling ──────────────────────────────────────
         // Wall timer: unaffected by use_sim_time, safe before /clock flows
@@ -173,69 +176,104 @@ private:
         sendNavGoal();
     }
 
-    // ── send NavigateThroughPoses goal ──────────────────────────────────
+    // ── send NavigateToPose goals ──────────────────────────────────
+
     void sendNavGoal()
     {
-        // Secondary guard: action server should already be ready, but
-        // wait_for_action_server gives a clean error if something went wrong.
-        if (!action_client_->wait_for_action_server(5s)) {
-            RCLCPP_ERROR(this->get_logger(),
-                "NavigateThroughPoses action server unavailable — aborting");
-            rclcpp::shutdown();
-            return;
-        }
+    	// Secondary guard: action server should already be ready
+    	if (!action_client_->wait_for_action_server(5s)) {
+        RCLCPP_ERROR(this->get_logger(),
+            "NavigateToPose action server unavailable — aborting");
+        rclcpp::shutdown();
+        return;
+    	}
 
-        auto make_pose = [this](double x, double y, double qx, double qw) {
+    	auto make_pose = [this](double x, double y, double qx, double qw) {
             geometry_msgs::msg::PoseStamped p;
-            p.header.frame_id    = "map";
+	    p.header.frame_id    = "map";
             p.header.stamp       = this->now();
             p.pose.position.x    = x;
             p.pose.position.y    = y;
             p.pose.orientation.x = qx;
             p.pose.orientation.w = qw;
             return p;
+    	};
+
+    	// Populate the class vector once at the start
+    	if (target_poses_.empty()) {
+        	target_poses_.push_back(make_pose(0.0, 0.0, 0.0, 1.0));  // waypoint 1
+        	target_poses_.push_back(make_pose(3.05, 2.03, 0.91, 0.42));  // waypoint 2
+        	target_poses_.push_back(make_pose(7.44, 0.61, 0.92, 0.38));  // waypoint 3
+        	target_poses_.push_back(make_pose(12.2, 4.7, 0.73, -0.68)); // waypoint 4
+        	target_poses_.push_back(make_pose(18.1, -5.95, 0.105, -1.0));  // waypoint 5
+        	target_poses_.push_back(make_pose(-4.86, -3.7, 0.62, -0.78)); // waypoint 6
+		current_pose_idx_ = 0;									    
+    	}
+
+    	// Safety check in case it gets called again when done
+    	if (current_pose_idx_ >= target_poses_.size()) {
+        	RCLCPP_INFO(this->get_logger(), "All waypoints already visited.");
+        	return;
+    	}
+
+    	// Create the NavigateToPose single goal message
+    	auto goal = NavigateToPose::Goal();
+    	goal.pose = target_poses_[current_pose_idx_];
+
+    	RCLCPP_INFO(this->get_logger(), "Sending waypoint %zu/%zu to NavigateToPose", current_pose_idx_ + 1, target_poses_.size());
+
+	auto opts = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
+
+	opts.goal_response_callback =
+        	[this](GoalHandleNavToPose::SharedPtr gh) {
+            	if (!gh) {
+                	RCLCPP_ERROR(this->get_logger(), "Goal rejected by server. Aborting mission.");
+                	rclcpp::shutdown();
+            	} else {
+                	RCLCPP_INFO(this->get_logger(), "Goal accepted — navigating");
+            	}
+        	};
+
+    	opts.result_callback =
+        	[this](const GoalHandleNavToPose::WrappedResult& result) {
+            	switch (result.code) {
+                	case rclcpp_action::ResultCode::SUCCEEDED:
+                    	  RCLCPP_INFO(this->get_logger(), "Waypoint %zu reached successfully!", current_pose_idx_ + 1);
+			  current_pose_idx_++;
+	                  // If more poses remain, send the next goal recursively
+                    	  if (current_pose_idx_ < target_poses_.size()) {
+                        	this->sendNavGoal();
+                    	  } else {
+                        	RCLCPP_INFO(this->get_logger(), "Path complete — all waypoints reached");
+                        	rclcpp::shutdown();
+                    	  }
+                    	  break;
+
+                	case rclcpp_action::ResultCode::ABORTED:
+                    	  RCLCPP_ERROR(this->get_logger(), "Navigation aborted at waypoint %zu", current_pose_idx_ + 1);
+                     	  rclcpp::shutdown();
+                    	  break;
+                
+			case rclcpp_action::ResultCode::CANCELED:
+                    	  RCLCPP_WARN(this->get_logger(), "Navigation canceled");
+                    	  rclcpp::shutdown();
+                    	  break;
+                
+			default:
+                    	  RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+                    	  rclcpp::shutdown();
+                    	  break;
+            }
         };
 
-        auto goal = NavigateThroughPoses::Goal();
-        goal.poses.push_back(make_pose( 0.0,  0.0,  0.0, 1.0)); // waypoint 1
-	goal.poses.push_back(make_pose(4.0, 0.0, 0.0, 1.0));    // waypoint 2
-  	goal.poses.push_back(make_pose( 7.0,  6.0,  0.0, 1.0)); // waypoint 3
-      	goal.poses.push_back(make_pose( 7.0,  2.35, 0.0, 0.0)); // waypoint 4
-
-        RCLCPP_INFO(this->get_logger(),
-            "Sending %zu waypoint(s) to NavigateThroughPoses", goal.poses.size());
-
-        auto opts = rclcpp_action::Client<NavigateThroughPoses>::SendGoalOptions();
-
-        opts.goal_response_callback =
-            [this](GoalHandleNavPoses::SharedPtr gh) {
-                if (!gh)
-                    RCLCPP_ERROR(this->get_logger(), "Goal rejected by server");
-                else
-                    RCLCPP_INFO(this->get_logger(), "Goal accepted — navigating");
-            };
-
-        opts.result_callback =
-            [this](const GoalHandleNavPoses::WrappedResult& result) {
-                switch (result.code) {
-                    case rclcpp_action::ResultCode::SUCCEEDED:
-                        RCLCPP_INFO (this->get_logger(), "Path complete — all waypoints reached"); break;
-                    case rclcpp_action::ResultCode::ABORTED:
-                        RCLCPP_ERROR(this->get_logger(), "Navigation aborted");  break;
-                    case rclcpp_action::ResultCode::CANCELED:
-                        RCLCPP_WARN (this->get_logger(), "Navigation canceled"); break;
-                    default:
-                        RCLCPP_ERROR(this->get_logger(), "Unknown result code"); break;
-                }
-                rclcpp::shutdown();
-            };
-
-        action_client_->async_send_goal(goal, opts);
+    action_client_->async_send_goal(goal, opts);
     }
 
     // ── state ───────────────────────────────────────────────────────────
     int init_pose_count_;
+    size_t current_pose_idx_ = 0;
     nav_msgs::msg::Path accumulated_path_;
+    std::vector<geometry_msgs::msg::PoseStamped> target_poses_;
 
     rclcpp::TimerBase::SharedPtr readiness_timer_;      // wall clock — fires even before /clock
     rclcpp::TimerBase::SharedPtr init_timer_;           // wall clock — started after readiness
@@ -244,7 +282,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr init_publisher_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr              tb4_gt_pose_subscriber_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr                           tb4_gt_path_publisher_;
-    rclcpp_action::Client<NavigateThroughPoses>::SharedPtr                      action_client_;
+    rclcpp_action::Client<NavigateToPose>::SharedPtr                      action_client_;
 };
 
 int main(int argc, char** argv)

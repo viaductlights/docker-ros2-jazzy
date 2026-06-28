@@ -60,7 +60,7 @@ public:
 	endpoint_pub_  = this->create_publisher<visualization_msgs::msg::MarkerArray>("pf_detected_points", 10);
 	// Single best-estimate pose, for evaluation against ground truth (e.g.
 	// the tb4 pose bridged from gz sim) and for tools like rqt_plot/PlotJuggler.
-	pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pf_pose", 10);
+	pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_pf", 10);
 	tb4_pf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_pf_path", 10); // initialize tb4 pf path publisher
 
         initialize_particles();
@@ -378,6 +378,10 @@ void update() {
         double c = particles_[0].weight;   // BUG FIX #1: was particles_.weight
         int i = 0;
 
+	// roughening noise to prevent sample impoverishment/diversity collapse and non realistic covariance
+	std::normal_distribution<double> roughen_xy(0.0, 0.01);     // relative to sigma_hit
+        std::normal_distribution<double> roughen_theta(0.0, 0.01);
+
         for (int m = 0; m < num_particles_; ++m) {
             double u = r + m * step;
             while (u > c && i < num_particles_ - 1) {
@@ -385,6 +389,9 @@ void update() {
                 c += particles_[i].weight;
             }
             Particle np = particles_[i];
+	    np.x     += roughen_xy(gen_);
+            np.y     += roughen_xy(gen_);
+            np.theta  = wrapAngle(np.theta + roughen_theta(gen_));
             np.weight   = step;   // reset to uniform after resampling
             new_particles.push_back(np);
         }
@@ -403,12 +410,9 @@ void update() {
                 continue;
 
             double angle   = scan.angle_min + (i * scan.angle_increment);
-            double x_lidar = range * std::cos(angle);
+            double x_lidar = range * std::cos(angle); // RPLidar → base_link transform (from EKF)
             double y_lidar = range * std::sin(angle);
-            // RPLidar → base_link transform (identical to EKF):
-            // The RPLidar is mounted facing backward on the TurtleBot4,
-            // so its x-axis points toward robot-right and y toward robot-front.
-            double x_base = -y_lidar - 0.04;
+            double x_base = -y_lidar - 0.04; 
             double y_base =  x_lidar;
             ScanPoints_.push_back(Eigen::Vector2d(x_base, y_base));
         }

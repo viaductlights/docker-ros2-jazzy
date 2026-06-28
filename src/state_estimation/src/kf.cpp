@@ -48,7 +48,12 @@ class KalmanFilter : public rclcpp::Node{
   private:
 	void syncCallback(const geometry_msgs::msg::TwistStamped::ConstSharedPtr & cmd_vel, const nav_msgs::msg::Odometry::ConstSharedPtr & odom){
 //	  RCLCPP_INFO(this->get_logger(), "sync callback with cmdl time %u and odom time %u \n cmdl %f, cmda %f, odomx %f, y %f, theta %f", cmd_vel->header.stamp.nanosec, odom->header.stamp.nanosec, cmd_vel->twist.linear.x, cmd_vel->twist.angular.z, odom->pose.pose.position.x, odom->pose.pose.position.y, odom->pose.pose.orientation.w); // debugging
-	  double cv_l = cmd_vel->twist.linear.x;
+           if (!initialized_){ // initializing check for first run
+                  last_stamp_ = rclcpp::Time(cmd_vel->header.stamp);
+                  initialized_ = true;
+                  return;
+          }
+      	  double cv_l = cmd_vel->twist.linear.x;
 	  double cv_a = cmd_vel->twist.angular.z;
 	  double odom_x = odom->pose.pose.position.x;
 	  double odom_y = odom->pose.pose.position.y;
@@ -58,10 +63,11 @@ class KalmanFilter : public rclcpp::Node{
 	  Eigen::Matrix3d Kalman_gain_;
 	  Eigen::Vector3d Sensor_data(odom_x, odom_y, odom_theta); 
 
-	  State_bar_ = pose_expected_t(cv_l, cv_a);	// predict tb4 state by applying motion model
-  	  
-
-	  Sigma_bar_ = covariance_t();	// incorporate process noise into covariance matrix
+          double dt = (rclcpp::Time(cmd_vel->header.stamp) - last_stamp_).seconds();
+          last_stamp_ = rclcpp::Time(cmd_vel->header.stamp);
+	  
+	  State_bar_ = pose_expected_t(cv_l, cv_a, dt);	// predict tb4 state by applying motion model
+  	  Sigma_bar_ = covariance_t();	// incorporate process noise into covariance matrix
 	  Kalman_gain_ = kalman_gain_t(Sigma_bar_); // incorporate measurement noise, covariance for sensor correction
 	  State_ = pose_updated_t(State_bar_, Kalman_gain_, Sensor_data); // corrected tb4 state
 	  State_(2) = atan2(sin(State_(2)), cos(State_(2))); // normalize in case of drift beyond [-pi, pi]
@@ -88,11 +94,11 @@ class KalmanFilter : public rclcpp::Node{
 	}
 
 	// helper functions for kf algo
-	Eigen::Vector3d pose_expected_t(const double & linear_vel, const double & angular_vel){
+	Eigen::Vector3d pose_expected_t(const double & linear_vel, const double & angular_vel, const double & dt){
 	  Eigen::Vector3d tb4_expected;
 	  Control_(0) = linear_vel;
 	  Control_(2) = angular_vel;
-	  tb4_expected = A_ * State_ + B_ * Control_;
+	  tb4_expected = A_ * State_ + B_ * dt * Control_;
 	  return tb4_expected;
 	}
 
@@ -168,7 +174,7 @@ class KalmanFilter : public rclcpp::Node{
 	
 	}
 
-	// tb4 ground_truth path publisher for kf testing purposes. will comment out in favour of ground_truth publisher in test_trajectory node
+	// tb4 ground_truth path publisher for visualization in rviz
 	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
 	  int tb4_index = this->get_parameter("tb4_object_index").as_int();
 	  double gz_offset = this->get_parameter("gz_x_offset").as_double();
@@ -197,6 +203,9 @@ class KalmanFilter : public rclcpp::Node{
 	  tb4_gt_path_publisher_->publish(accumulated_path_);
 	}
 
+	bool initialized_ = false;
+	rclcpp::Time last_stamp_;
+
 	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_kf_path_;
 	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
@@ -210,7 +219,8 @@ class KalmanFilter : public rclcpp::Node{
 	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>> sync;
 
 	Eigen::Matrix3d A_ = Eigen::Matrix3d::Identity(3, 3);
-	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3) * 0.05; // message filter syncing cmd_vel msgs elapses approximately 50 ms btw msgs
+	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3);
+//	Eigen::Matrix3d B_ = Eigen::Matrix3d::Identity(3, 3) * 0.05; // message filter syncing cmd_vel msgs elapses approximately 50 ms btw msgs, replaced w dt
 	Eigen::Matrix3d C_ = Eigen::Matrix3d::Identity(3, 3);
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 0); // initialize robot state vector at time = 0
 	Eigen::Vector3d Control_ = Eigen::Vector3d(0, 0, 0); // initialize control vector at time = 0						   

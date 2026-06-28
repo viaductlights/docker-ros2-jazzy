@@ -191,8 +191,8 @@ class LandmarkDebug : public rclcpp::Node{
 
 	// sort points into clusters and then segment each cluster's endpoints
 	std::vector<std::vector<Eigen::Vector2d>> extract_clusters_(const std::vector<Eigen::Vector2d> & points){
-	  double max_gap = 0.2;
-	  double max_distance = 333.0;
+	  double max_gap = 0.1;
+	  double max_distance = 3.0;
 	  std::vector<std::vector<Eigen::Vector2d>> clusters;
 	  std::vector<Eigen::Vector2d> current;
 

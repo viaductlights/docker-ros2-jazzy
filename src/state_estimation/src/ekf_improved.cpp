@@ -66,9 +66,9 @@ class ImprovedExtendedKalmanFilter : public rclcpp::Node{
 	  //pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped("tb4_stamped", 10);
 //	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_ekfi_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekfi_path", 10); // initialize tb4 ekf path publisher
-	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("clusters", 10); // cluster publisher (for debugging)
-	  detected_points_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("detected_points", 10); // initialize detected corner publisher (for debugging)	  
-	  match_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("matches", 10); // initialize detected matches publisher (for debugging)	
+	  cluster_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("ekfi_clusters", 10); // cluster publisher (for debugging)
+	  detected_points_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("ekfi_detected_points", 10); // initialize detected corner publisher (for debugging)	  
+	  match_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("ekfi_matches", 10); // initialize detected matches publisher (for debugging)	
   	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
 	  
 	  uint32_t queue_size = 10;
@@ -110,6 +110,10 @@ class ImprovedExtendedKalmanFilter : public rclcpp::Node{
 		Eigen::Vector2d nu;
 		computeInnovation_(match.matched_point, match.landmark_index, State_, Sigma_bar_, R_, H, S_inv, nu);
 
+		if (std::abs(nu(0)) > 0.4 || std::abs(nu(1)) > 0.3) {
+		       	RCLCPP_WARN(this->get_logger(), "Innovation too large (r=%.2f, b=%.2f rad), skipping", nu(0), nu(1));
+        		continue;
+    		}
 		Kalman_gain_ = Sigma_bar_ * H.transpose() * S_inv; // Kalman_gain_ from landmark localization
 		State_ = State_ + Kalman_gain_ * nu; // corrected tb4 state
 		State_(2) = atan2(sin(State_(2)), cos(State_(2)));
@@ -128,7 +132,7 @@ class ImprovedExtendedKalmanFilter : public rclcpp::Node{
           pose_msg_l.pose.position.y = State_(1);
 
 	  tf2::Quaternion q_corrected;
-	  q_corrected.setRPY(0, 0, State_(2)); // was never set before — left q_corrected uninitialized
+	  q_corrected.setRPY(0, 0, State_(2));
           pose_msg_l.pose.orientation = tf2::toMsg(q_corrected);
           publish_path_l_t(pose_msg_l);
 	}
@@ -571,8 +575,8 @@ class ImprovedExtendedKalmanFilter : public rclcpp::Node{
 	  marker.action = visualization_msgs::msg::Marker::ADD;
 	  marker.scale.x = 0.5;
 	  marker.scale.y = 0.5;
-	  marker.color.r = 1.0f;
-	  marker.color.g = 0.5f;
+	  marker.color.r = 0.0f; // green
+	  marker.color.g = 1.0f;
 	  marker.color.b = 0.0f;
 	  marker.color.a = 1.0f;
 	  geometry_msgs::msg::Point p;
@@ -666,8 +670,8 @@ class ImprovedExtendedKalmanFilter : public rclcpp::Node{
 	Eigen::Vector3d State_ = Eigen::Vector3d(0, 0, 0); // initialize robot state vector at time = 0
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to one since tb4's state is known at t = 0
 
-	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.005 ; // measurement noise value
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.06; // process noise value
+	Eigen::Matrix2d R_ = Eigen::Matrix2d::Identity(2, 2) * 0.15 ; // measurement noise value
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.05; // process noise value
 
 	std::vector<std::vector<Eigen::Vector2d>> Clusters_;
 	std::vector<std::vector<Eigen::Vector2d>> Endpoints_;

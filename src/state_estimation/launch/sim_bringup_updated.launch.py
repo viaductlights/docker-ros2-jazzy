@@ -38,12 +38,12 @@ def generate_launch_description():
     )
 
     # test_trajectory_version selects which compiled executable to run.
-    # The three files (test_trajectory_1/2/3.cpp) are never launched together.
+    # The three files (test_trajectory_1/2/3/4/5.cpp) are never launched together.
     declare_test_traj_version = DeclareLaunchArgument(
         'test_trajectory_version',
         default_value='1',
-        choices=['1', '2', '3'],
-        description='Which test_trajectory executable to run (1, 2, or 3)',
+        choices=['1', '2', '3', '4', '5'],    # 1: no set trajectory 2: short ThroughPose 3: long ThroughPose wp 4: short ToPose 5: longToPose
+        description='Which test_trajectory executable to run (1, 2, 3, 4, or 5)',
     )
 
     # Milliseconds to wait after publishing /initialpose before sending the
@@ -126,10 +126,31 @@ def generate_launch_description():
         output='screen'
     )
 
+    ekf_node = Node(
+        package='state_estimation',
+        executable='ekf',
+        name='ekf_landmarks_poor',
+        output='screen'
+    )
+
     pf_node = Node(
         package='state_estimation',
         executable='pf',
         name='pf_node',
+        output='screen'
+    )
+
+    kf_quat_error_node = Node(
+        package='state_estimation',
+        executable='kf_wrong_quat',
+        name='kf_quat_error_node',
+        output='screen'
+    )
+
+    ekfo_quat_error_node = Node(
+        package='state_estimation',
+        executable='ekf_odom_wrong_quat',
+        name='ekfo_quat_error_node',
         output='screen'
     )
 
@@ -161,8 +182,11 @@ def generate_launch_description():
         declare_nav_goal_delay,
         #kf_node,
         #ekfo_node,
-        ekfi_node,
+        #ekfi_node,
+        #ekf_node,    
         #pf_node,
+        #kf_quat_error_node,
+        #ekfo_quat_error_node,
         launch_tb4_simulation,
         delayed_test_node,
     ])

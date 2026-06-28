@@ -17,6 +17,8 @@ using namespace std::chrono_literals;
 using NavigateThroughPoses = nav2_msgs::action::NavigateThroughPoses;
 using GoalHandleNavPoses   = rclcpp_action::ClientGoalHandle<NavigateThroughPoses>;
 
+// NavigateThroughPoses planner - long trajectory
+
 // ---------------------------------------------------------------------------
 // Startup sequence
 //   AWAITING_READINESS    → poll every 1 s (wall clock) until all three gates

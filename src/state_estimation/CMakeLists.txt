@@ -31,6 +31,12 @@ ament_target_dependencies(test_trajectory_2 rclcpp geometry_msgs nav2_msgs rclcp
 add_executable(test_trajectory_3 src/test_trajectory_3.cpp)
 ament_target_dependencies(test_trajectory_3 rclcpp geometry_msgs nav2_msgs rclcpp_action)
 
+add_executable(test_trajectory_4 src/test_trajectory_4.cpp)
+ament_target_dependencies(test_trajectory_4 rclcpp geometry_msgs nav2_msgs rclcpp_action)
+
+add_executable(test_trajectory_5 src/test_trajectory_5.cpp)
+ament_target_dependencies(test_trajectory_5 rclcpp geometry_msgs nav2_msgs rclcpp_action)
+
 include_directories(include ${EIGEN3_INCLUDE_DIRS})
 
 ament_export_dependencies(eigen3_cmake_module)
@@ -44,6 +50,9 @@ ament_target_dependencies(kf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs 
 
 add_executable(ekf_odom src/ekf_odom.cpp)
 ament_target_dependencies(ekf_odom rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+
+add_executable(ekf_odom_wrong_quat src/ekf_odom_wrong_quat.cpp)
+ament_target_dependencies(ekf_odom_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
 add_executable(ekf src/ekf.cpp)
 ament_target_dependencies(ekf rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
@@ -60,7 +69,7 @@ ament_target_dependencies(pf rclcpp geometry_msgs sensor_msgs nav_msgs nav2_msgs
 add_executable(test_landmarks src/test_landmarks.cpp)
 ament_target_dependencies(test_landmarks rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-install(TARGETS test_trajectory_1 test_trajectory_2 test_trajectory_3 kf ekf test_landmarks kf_wrong_quat ekf_odom ekf_wrong_quat ekf_improved pf
+install(TARGETS test_trajectory_1 test_trajectory_2 test_trajectory_3 test_trajectory_4 test_trajectory_5 kf ekf test_landmarks kf_wrong_quat ekf_odom ekf_odom_wrong_quat ekf_wrong_quat ekf_improved pf
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
