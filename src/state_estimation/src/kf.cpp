@@ -31,18 +31,38 @@ class KalmanFilter : public rclcpp::Node{
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  kt_publisher_ = this->create_publisher<std_msgs::msg::Float32>("kt", 10);
 	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_kf", 10);
-	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
-	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
+//	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&KalmanFilter::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
+//	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_kf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_kf_path", 10); // initialize tb4 kf filter path publisher
 	
-  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
-	  this->declare_parameter<double>("gz_x_offset", 8.0); // param for offsetting different between rviz and gz coordinates
-	  
+  	  //this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
+	  //this->declare_parameter<double>("gz_x_offset", 8.0); // param for offsetting different between rviz and gz coordinates
+	
+	  // process and measurement noise variables	  
+	  this->declare_parameter<double>("r1", 0.05);
+          this->declare_parameter<double>("r2", 0.05);
+          this->declare_parameter<double>("r3", 0.05);
+          this->declare_parameter<double>("q1", 0.10);
+          this->declare_parameter<double>("q2", 0.10);
+          this->declare_parameter<double>("q3", 0.10);
+          // baseline R: 0.05, Q: 0.10
+	  // trust measurement R: 0.3, Q: 0.001
+          // trust prediction R: 0.001, Q: 0.5
+          // non isotropic distrust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_.diagonal() << 0.01, 0.01, 0.5;
+          // non isotropic trust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_diagonal() << 0.01, 0.01, 0.001;
+	  R_.diagonal() << this->get_parameter("r1").as_double(),
+		  	this->get_parameter("r2").as_double(),
+                        this->get_parameter("r3").as_double();
+          Q_.diagonal() << this->get_parameter("q1").as_double(),
+                        this->get_parameter("q2").as_double(),
+                        this->get_parameter("q3").as_double();
+
 	  uint32_t queue_size = 10;
 	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_); // initialize approximate time message filter for odom and cmd_vel msgs
 	  
 	  sync->setAgePenalty(0.50);
 	  sync->registerCallback(std::bind(&KalmanFilter::syncCallback, this, _1, _2)); // sync callback for message filter
+	  
 	}
 
   private:
@@ -175,7 +195,7 @@ class KalmanFilter : public rclcpp::Node{
 	}
 
 	// tb4 ground_truth path publisher for visualization in rviz
-	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
+/*	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
 	  int tb4_index = this->get_parameter("tb4_object_index").as_int();
 	  double gz_offset = this->get_parameter("gz_x_offset").as_double();
 
@@ -201,21 +221,21 @@ class KalmanFilter : public rclcpp::Node{
           accumulated_path_.poses.push_back(current_pose_stamped);
 
 	  tb4_gt_path_publisher_->publish(accumulated_path_);
-	}
+	}*/
 
 	bool initialized_ = false;
 	rclcpp::Time last_stamp_;
 
-	nav_msgs::msg::Path accumulated_path_;
+//	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_kf_path_;
 	rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr kt_publisher_;
-	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
+//	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_kf_path_publisher_;
 	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
 
 	message_filters::Subscriber<geometry_msgs::msg::TwistStamped> cmd_vel_sub_;
 	message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
-	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_;
+//	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_;
 	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>> sync;
 
 	Eigen::Matrix3d A_ = Eigen::Matrix3d::Identity(3, 3);
@@ -226,8 +246,9 @@ class KalmanFilter : public rclcpp::Node{
 	Eigen::Vector3d Control_ = Eigen::Vector3d(0, 0, 0); // initialize control vector at time = 0						   
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.001 ; // initialize starting covariance to small num since tb4's state is known at t = 0
 
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // process nosie value
-	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.001; // measurement noise value
+	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3); // process noise matrix
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3); // measurement noise matrix
+
 };
 
 int main (int argc, char ** argv){

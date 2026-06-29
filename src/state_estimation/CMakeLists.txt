@@ -46,7 +46,7 @@ add_executable(kf src/kf.cpp)
 ament_target_dependencies(kf rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs tf2 tf2_geometry_msgs Eigen3 message_filters)
 
 add_executable(kf_wrong_quat src/kf_wrong_quat.cpp)
-ament_target_dependencies(kf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs Eigen3 message_filters)
+ament_target_dependencies(kf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs tf2 tf2_geometry_msgs Eigen3 message_filters)
 
 add_executable(ekf_odom src/ekf_odom.cpp)
 ament_target_dependencies(ekf_odom rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
@@ -54,22 +54,23 @@ ament_target_dependencies(ekf_odom rclcpp std_msgs geometry_msgs nav2_msgs nav_m
 add_executable(ekf_odom_wrong_quat src/ekf_odom_wrong_quat.cpp)
 ament_target_dependencies(ekf_odom_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-add_executable(ekf src/ekf.cpp)
-ament_target_dependencies(ekf rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+add_executable(ekf_gated src/ekf_gated.cpp)
+ament_target_dependencies(ekf_gated rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-add_executable(ekf_wrong_quat src/ekf_wrong_quat.cpp)
-ament_target_dependencies(ekf_wrong_quat rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs visualization_msgs Eigen3 message_filters)
-
-add_executable(ekf_improved src/ekf_improved.cpp)
-ament_target_dependencies(ekf_improved rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
+add_executable(ekf_ungated src/ekf_ungated.cpp)
+ament_target_dependencies(ekf_ungated rclcpp std_msgs geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
 add_executable(pf src/pf.cpp)
 ament_target_dependencies(pf rclcpp geometry_msgs sensor_msgs nav_msgs nav2_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3)
 
+add_executable(pf_wrong_quat src/pf_wrong_quat.cpp)
+ament_target_dependencies(pf_wrong_quat rclcpp geometry_msgs sensor_msgs nav_msgs nav2_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3)
+
 add_executable(test_landmarks src/test_landmarks.cpp)
 ament_target_dependencies(test_landmarks rclcpp geometry_msgs nav2_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs visualization_msgs Eigen3 message_filters)
 
-install(TARGETS test_trajectory_1 test_trajectory_2 test_trajectory_3 test_trajectory_4 test_trajectory_5 kf ekf test_landmarks kf_wrong_quat ekf_odom ekf_odom_wrong_quat ekf_wrong_quat ekf_improved pf
+install(TARGETS test_trajectory_1 test_trajectory_2 test_trajectory_3 test_trajectory_4 test_trajectory_5 test_landmarks
+	kf ekf_gated ekf_odom pf kf_wrong_quat ekf_ungated ekf_odom_wrong_quat pf_wrong_quat
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin

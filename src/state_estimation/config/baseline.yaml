@@ -1,0 +1,99 @@
+# =============================================================================
+# baseline for all 8 filter nodes
+# Target: K_ss ≈ 0.5 for sensor fusion filters
+# Use as the primary comparison baseline across all filters and trajectories
+# =============================================================================
+#   Sensor fusion nodes (kf, ekf_odom, kf_quat_error, ekf_odom_quat_error):
+#     r1/r2/r3 R_ diagonal (process noise)
+#     q1/q2/q3 Q_ diagonal (measurement noise)
+#
+#   Localization nodes (ekf_gated, ekf_ungated):
+#     r1/r2/r3  R_ diagonal (process noise)
+#     q1/q2/  Q_ diagonal (measurement noise [range, bearing])
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SENSOR FUSION GROUP
+# Inputs: cmd_vel + odom
+# R_ (process noise): 0.05·I  — isotropic, all dimensions equal
+# Q_ (measurement noise): 0.10·I  — 2x process noise → K_ss ≈ 0.5
+# These four nodes receive identical parameters for direct comparison
+# -----------------------------------------------------------------------------
+
+kf_node:
+  ros__parameters:
+    r1: 0.05    # process noise x
+    r2: 0.05    # process noise y
+    r3: 0.05    # process noise theta
+    q1: 0.10    # measurement noise x    (odom position x)
+    q2: 0.10    # measurement noise y    (odom position y)
+    q3: 0.10    # measurement noise theta (odom orientation — intentionally
+                #                          misread as quaternion.w in this node)
+
+kf_quat_error_node:
+  ros__parameters:
+    r1: 0.05    # identical to kf_node — error is in measurement model
+    r2: 0.05    
+    r3: 0.05
+    q1: 0.10
+    q2: 0.10
+    q3: 0.10
+
+ekfo_node:
+  ros__parameters:
+    r1: 0.05
+    r2: 0.05
+    r3: 0.05
+    q1: 0.10
+    q2: 0.10
+    q3: 0.10
+
+ekfo_quat_error_node:
+  ros__parameters:
+    r1: 0.05    # 
+    r2: 0.05    # EKF coupling means quat error propagates to x/y unlike KF
+    r3: 0.05
+    q1: 0.10
+    q2: 0.10
+    q3: 0.10
+
+# -----------------------------------------------------------------------------
+# LOCALIZATION GROUP
+# Inputs: cmd_vel + scan (landmark observations)
+# R_ (landmark measurement noise, 2x2): 0.15·I [range, bearing]
+# Q_ (process noise, 3x3): 0.05·I
+# Gated and ungated nodes receive identical parameters — only architectural
+# difference is presence/absence of Mahalanobis gate and innovation check
+# -----------------------------------------------------------------------------
+
+ekfg_node:
+  ros__parameters:
+    q1: 0.15    # range measurement noise (metres²)
+    q2: 0.15    # bearing measurement noise (radians²)
+    r1: 0.05    # process noise x
+    r2: 0.05    # process noise y
+    r3: 0.05    # process noise theta
+
+ekf_loc_ungated_node:
+  ros__parameters:
+    q1: 0.15    # identical to gated — isolates gating as the sole variable
+    q2: 0.15
+    r1: 0.05
+    r2: 0.05
+    r3: 0.05
+
+# -----------------------------------------------------------------------------
+# PARTICLE FILTER
+# N equivalent to measurement trust:
+#   N=100  ≈ high measurement trust (K→1): fast convergence, brittle
+#   N=500  ≈ balanced (K≈0.5): primary comparison condition
+#   N=2000 ≈ low measurement trust (K→0): robust, slow convergence
+# -----------------------------------------------------------------------------
+
+pf_node:
+  ros__parameters:
+    n_particles: 500
+
+pf_quat_error_node:
+  ros__parameters:
+    n_particles: 500

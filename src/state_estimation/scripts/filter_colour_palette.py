@@ -43,7 +43,7 @@ def generate_shades(base_color, n, lightness_range=(0.30, 0.70)):
 FILTER_SPEC = {
     'KF':              dict(color='tab:blue',  n=2),
     'EKF_landmark':    dict(color='tab:orange', n=4),
-    'EKF_no_landmark': dict(color='gold',       n=2, lightness_range=(0.35, 0.55)),
+    'EKF_no_landmark': dict(color='tab:purple', n=2),
     'PF':              dict(color='tab:red',    n=1),  # bump n as you add PF variants
 }
 

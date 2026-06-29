@@ -1,3 +1,4 @@
+
 #include "rclcpp/rclcpp.hpp"
 
 #include <random>
@@ -32,21 +33,21 @@ struct Particle {
     double weight = 1.0;
 };
 
-class ParticleFilter : public rclcpp::Node {
+class ParticleFilterQuatError : public rclcpp::Node {
 public:
-    ParticleFilter() : Node("pf"){
-	this->declare_parameter<int>("n_particles", 500); // test variables: 500, 100, 1000
+    ParticleFilterQuatError() : Node("pf_qe"){
+        this->declare_parameter<int>("n_particles", 500); // test variables: 500, 100, 1000
 	num_particles_ = this->get_parameter("n_particles").as_int();
-
-        // Initialize random engine
+	
+	// Initialize random engine
         std::random_device rd;
         gen_ = std::mt19937(rd());
 
         // Subscribers
-        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10, std::bind(&ParticleFilter::odomCallback, this, std::placeholders::_1));
+        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10, std::bind(&ParticleFilterQuatError::odomCallback, this, std::placeholders::_1));
  scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan", 10,
-            std::bind(&ParticleFilter::scanCallback, this, _1));
+            std::bind(&ParticleFilterQuatError::scanCallback, this, _1));
 
         // map_server publishes /map once, latched (transient_local). Subscribing
         // with matching QoS means we still get it even if map_server published
@@ -56,14 +57,14 @@ public:
         map_qos.reliable();
         map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
             "/map", map_qos,
-            std::bind(&ParticleFilter::mapCallback, this, _1));
+            std::bind(&ParticleFilterQuatError::mapCallback, this, _1));
 
         // Publisher to visualize particles in RViz2
-        particle_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/particles", 10);
+        particle_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/particles_qe", 10);
 	// Single best-estimate pose, for evaluation against ground truth (e.g.
 	// the tb4 pose bridged from gz sim) and for tools like rqt_plot/PlotJuggler.
-	pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_pf", 10);
-	tb4_pf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_pf_path", 10); // initialize tb4 pf path publisher
+	pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_pf_qe", 10);
+	tb4_pf_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_pf_qe_path", 10); // initialize tb4 pf path publisher
 
         initialize_particles();
 
@@ -98,8 +99,8 @@ public:
 	  // Calculate delta from previous odom
           double dx = msg->pose.pose.position.x - last_odom.pose.pose.position.x;
           double dy = msg->pose.pose.position.y - last_odom.pose.pose.position.y;
-	  double prev_yaw = extractYaw(last_odom.pose.pose.orientation);
-          double curr_yaw = extractYaw(msg->pose.pose.orientation);
+	  double prev_yaw = last_odom.pose.pose.orientation.w; // wrong theta state: no quaternion -> euler conversion
+          double curr_yaw = msg->pose.pose.orientation.w; // wrong theta state
           double dtheta   = wrapAngle(curr_yaw - prev_yaw);
           double trans    = std::hypot(dx, dy);
         
@@ -117,7 +118,6 @@ public:
           extract_scan_(*msg);   // populates ScanPoints_ in base_link frame
 
           if (ScanPoints_.empty()) return;
-
           if (!map_received_) return;  // nothing to score particles against yet
 
           update();
@@ -500,8 +500,7 @@ void update() {
 	  tb4_pf_path_publisher_->publish(accumulated_pf_path_);
       	}
 
-
-    static double wrapAngle(double a) {
+   static double wrapAngle(double a) {
         while (a >  M_PI) a -= 2.0 * M_PI;
         while (a < -M_PI) a += 2.0 * M_PI;
         return a;
@@ -541,7 +540,7 @@ void update() {
 
 int main(int argc, char ** argv) {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<ParticleFilter>());
+    rclcpp::spin(std::make_shared<ParticleFilterQuatError>());
     rclcpp::shutdown();
     return 0;
 }

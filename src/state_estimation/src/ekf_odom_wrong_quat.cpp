@@ -36,8 +36,27 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_ekfo_qe", 10); // initialize state estimation publisher
 	  tb4_ekfo_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekfo_qe_path", 10); // initialize tb4 ekf (odom sensor fusion)  path publisher
-  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
 	  
+	  // process and measurement noise variables      
+          this->declare_parameter<double>("r1", 0.05);
+          this->declare_parameter<double>("r2", 0.05);
+          this->declare_parameter<double>("r3", 0.05);
+          this->declare_parameter<double>("q1", 0.10);
+          this->declare_parameter<double>("q2", 0.10);
+          this->declare_parameter<double>("q3", 0.10);
+          // baseline R: 0.05, Q: 0.10
+          // trust measurement R: 0.3, Q: 0.001
+          // trust prediction R: 0.001, Q: 0.5
+          // non isotropic distrust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_.diagonal() << 0.01, 0.01, 0.5;
+          // non isotropic trust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_diagonal() << 0.01, 0.01, 0.001;
+          R_.diagonal() << this->get_parameter("r1").as_double(),
+                        this->get_parameter("r2").as_double(),
+                        this->get_parameter("r3").as_double();
+          Q_.diagonal() << this->get_parameter("q1").as_double(),
+                        this->get_parameter("q2").as_double(),
+                        this->get_parameter("q3").as_double();
+
+
 	  uint32_t queue_size = 10;
 	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_); // initialize approximate time message filter for odom and scan msgs
 	  
@@ -52,7 +71,7 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
 	  double vel_a = cmd_vel->twist.angular.z;
 	  double odom_x = odom->pose.pose.position.x;
 	  double odom_y = odom->pose.pose.position.y;
-	  double odom_theta = tf2::getYaw(odom->pose.pose.orientation);
+	  double odom_theta = odom->pose.pose.orientation.w; // measurement model error: cos(theta/2) rather than proper quaternion->euler conversion
 
 	  Eigen::Vector3d State_bar_;
 	  Eigen::Matrix3d Sigma_bar_;
@@ -76,12 +95,12 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
 	  Sigma_bar_ = covariance_t(vel_l, State_(2), vel_a, dt);	// incorporate process noise into covariance matrix
 	  nu_ = Sensor_data - State_bar_; // compute innovation
 	  nu_(2) = atan2(sin(nu_(2)), cos(nu_(2))); // angle wrap
-	  S_ = H_ * Sigma_bar_ * H_.transpose() + R_;
+	  S_ = H_ * Sigma_bar_ * H_.transpose() + Q_;
 	  Kalman_gain_ = Sigma_bar_ * H_.transpose() * S_.inverse(); // Kalman_gain_
 	  State_ = State_bar_ + Kalman_gain_ * nu_; // corrected tb4 state
 	  State_(2) = atan2(sin(State_(2)), cos(State_(2)));
 	  Joseph_helper_ = Eigen::Matrix3d::Identity() - Kalman_gain_ * H_; // for expressing covariance update in Joseph form
-	  Sigma_ = Joseph_helper_ * Sigma_bar_ * Joseph_helper_.transpose() + Kalman_gain_ * R_ * Kalman_gain_.transpose();
+	  Sigma_ = Joseph_helper_ * Sigma_bar_ * Joseph_helper_.transpose() + Kalman_gain_ * Q_ * Kalman_gain_.transpose();
 	  Sigma_ = 0.5 * (Sigma_ + Sigma_.transpose()); // symmetrize
 //	  Sigma_ *= 100.0; // rviz covariance display debugging
 			    
@@ -92,7 +111,10 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
           pose_msg_o.header.frame_id = "map";
           pose_msg_o.pose.position.x = State_(0);
           pose_msg_o.pose.position.y = State_(1);
-	  pose_msg_o.pose.orientation.w = State_(2); // wrong quat
+
+	  tf2::Quaternion q_corrected;
+	  q_corrected.setRPY(0, 0, State_(2));
+	  pose_msg_o.pose.orientation = tf2::toMsg(q_corrected);
           publish_path_t(pose_msg_o);
 	}
 
@@ -113,7 +135,7 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
 	  double theta = previous_theta + angular_vel * time_step;
 	  G(0,2) = -linear_vel*sin(theta) * time_step;
 	  G(1,2) = linear_vel*cos(theta) * time_step;
-	  G = G * Sigma_ * G.transpose() + Q_;
+	  G = G * Sigma_ * G.transpose() + R_;
 	  return G;
 	}
 
@@ -124,7 +146,10 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
     	  msg.header.frame_id = "map";
     	  msg.pose.pose.position.x = State_(0);
     	  msg.pose.pose.position.y = State_(1);
-	  msg.pose.pose.orientation.w = State_(2); // wrong quaternion entry
+	  
+	  tf2::Quaternion q;
+	  q.setRPY(0,0,State_(2));
+	  msg.pose.pose.orientation = tf2::toMsg(q);
 
     	  std::fill(
         	msg.pose.covariance.begin(),
@@ -173,9 +198,8 @@ class ExtendedKalmanFilterOdomQuatError : public rclcpp::Node{
 	Eigen::Vector3d State_dr_ = Eigen::Vector3d(0, 0, 0); // pure dead-reckoning baseline (no landmark correction); predicted every cycle, never corrected
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to small number since tb4's state is known at t = 0
 
-	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.01 ; // measurement noise value
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.001; // process noise value
-
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3); // measurement noise value
+	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3); // process noise value
 };
 
 int main (int argc, char ** argv){

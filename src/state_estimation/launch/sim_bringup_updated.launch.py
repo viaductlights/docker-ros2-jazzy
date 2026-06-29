@@ -107,50 +107,64 @@ def generate_launch_description():
     kf_node = Node(
         package='state_estimation',
         executable='kf',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
         name='kf_node',
-        output='screen'
-    )
-
-    ekfo_node = Node(
-        package='state_estimation',
-        executable='ekf_odom',
-        name='ekf_sensors_node',
-        output='screen'
-    )
-
-
-    ekfi_node = Node(
-        package='state_estimation',
-        executable='ekf_improved',
-        name='ekf_landmarks_node',
-        output='screen'
-    )
-
-    ekf_node = Node(
-        package='state_estimation',
-        executable='ekf',
-        name='ekf_landmarks_poor',
-        output='screen'
-    )
-
-    pf_node = Node(
-        package='state_estimation',
-        executable='pf',
-        name='pf_node',
         output='screen'
     )
 
     kf_quat_error_node = Node(
         package='state_estimation',
         executable='kf_wrong_quat',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
         name='kf_quat_error_node',
+        output='screen'
+    )
+    
+    ekfo_node = Node(
+        package='state_estimation',
+        executable='ekf_odom',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],    
+        name='ekf_sensors_node',
+        output='screen'
+    )
+
+    ekfg_node = Node(
+        package='state_estimation',
+        executable='ekf_gated',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
+        name='ekf_gated_landmarks_node',
         output='screen'
     )
 
     ekfo_quat_error_node = Node(
         package='state_estimation',
         executable='ekf_odom_wrong_quat',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
         name='ekfo_quat_error_node',
+        output='screen'
+    )
+    
+    ekfug_node = Node(
+        package='state_estimation',
+        executable='ekf_ungated',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
+        name='ekf_ungated_landmarks_node',
+        output='screen'
+    )
+
+    pf_node = Node(
+        package='state_estimation',
+        executable='pf',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
+        name='pf_node',
+        output='screen'
+    )
+
+    pf_quat_error_node = Node(
+        package='state_estimation',
+        executable='pf_wrong_quat',
+        parameters=[os.path.join(my_package, 'config', 'balanced.yaml')],
+        name='pf_quat_error_node',
         output='screen'
     )
 
@@ -180,13 +194,14 @@ def generate_launch_description():
         declare_tb4_index,
         declare_test_traj_version,
         declare_nav_goal_delay,
-        #kf_node,
-        #ekfo_node,
-        #ekfi_node,
-        #ekf_node,    
-        #pf_node,
-        #kf_quat_error_node,
-        #ekfo_quat_error_node,
+        kf_node,
+        kf_quat_error_node,
+        ekfo_node,                
+        ekfo_quat_error_node,
+        ekfug_node,
+        ekfg_node,    
+        pf_node,
+        pf_quat_error_node,
         launch_tb4_simulation,
         delayed_test_node,
     ])

@@ -36,11 +36,30 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
 	  odom_sub_.subscribe(this, "odom", qos.get_rmw_qos_profile());
 	  pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_ekfo", 10); // initialize state estimation publisher
 	  pose_pub_dr_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("pose_ekf_dr", 10); // initialize dead reckoning pose publisher
-	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&ExtendedKalmanFilterOdom::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
-	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
+//	  tb4_gt_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseArray>("tb4_dynamic_pose", 10, std::bind(&ExtendedKalmanFilterOdom::gtPoseCallback, this, std::placeholders::_1)); // initialize tb4 ground truth pose subscriber from bridged gz sim msg
+//	  tb4_gt_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_gt_path", 10); // initialize tb4 ground truth path publisher
 	  tb4_dr_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekf_dr_path", 10); // initialize tb4 dead reckoning path publisher (no ekf)
 	  tb4_ekfo_path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("tb4_ekfo_path", 10); // initialize tb4 ekf (odom sensor fusion)  path publisher
-  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
+//  	  this->declare_parameter<int>("tb4_object_index", 1); // param for tb4 ground truth publisher for testing
+	  
+          // process and measurement noise variables      
+          this->declare_parameter<double>("r1", 0.05);
+          this->declare_parameter<double>("r2", 0.05);
+          this->declare_parameter<double>("r3", 0.05);
+          this->declare_parameter<double>("q1", 0.10);
+          this->declare_parameter<double>("q2", 0.10);
+          this->declare_parameter<double>("q3", 0.10);
+          // baseline R: 0.05, Q: 0.10
+          // trust measurement R: 0.3, Q: 0.001
+          // trust prediction R: 0.001, Q: 0.5
+          // non isotropic distrust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_.diagonal() << 0.01, 0.01, 0.5;
+          // non isotropic trust theta R_.diagonal() << 0.05, 0.05, 0.05; Q_diagonal() << 0.01, 0.01, 0.001;
+          R_.diagonal() << this->get_parameter("r1").as_double(),
+                        this->get_parameter("r2").as_double(),
+                        this->get_parameter("r3").as_double();
+          Q_.diagonal() << this->get_parameter("q1").as_double(),
+                        this->get_parameter("q2").as_double(),
+                        this->get_parameter("q3").as_double();
 	  
 	  uint32_t queue_size = 10;
 	  sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>>(message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>(queue_size), cmd_vel_sub_, odom_sub_); // initialize approximate time message filter for odom and scan msgs
@@ -94,12 +113,12 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
 	  Sigma_bar_ = covariance_t(vel_l, State_(2), vel_a, dt);	// incorporate process noise into covariance matrix
 	  nu_ = Sensor_data - State_bar_; // compute innovation
 	  nu_(2) = atan2(sin(nu_(2)), cos(nu_(2))); // angle wrap
-	  S_ = H_ * Sigma_bar_ * H_.transpose() + R_;
+	  S_ = H_ * Sigma_bar_ * H_.transpose() + Q_;
 	  Kalman_gain_ = Sigma_bar_ * H_.transpose() * S_.inverse(); // Kalman_gain_
 	  State_ = State_bar_ + Kalman_gain_ * nu_; // corrected tb4 state
 	  State_(2) = atan2(sin(State_(2)), cos(State_(2)));
 	  Joseph_helper_ = Eigen::Matrix3d::Identity() - Kalman_gain_ * H_; // for expressing covariance update in Joseph form
-	  Sigma_ = Joseph_helper_ * Sigma_bar_ * Joseph_helper_.transpose() + Kalman_gain_ * R_ * Kalman_gain_.transpose();
+	  Sigma_ = Joseph_helper_ * Sigma_bar_ * Joseph_helper_.transpose() + Kalman_gain_ * Q_ * Kalman_gain_.transpose();
 	  Sigma_ = 0.5 * (Sigma_ + Sigma_.transpose()); // symmetrize
 //	  Sigma_ *= 100.0; // rviz covariance display debugging
 			    
@@ -134,7 +153,7 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
 	  double theta = previous_theta + angular_vel * time_step;
 	  G(0,2) = -linear_vel*sin(theta) * time_step;
 	  G(1,2) = linear_vel*cos(theta) * time_step;
-	  G = G * Sigma_ * G.transpose() + Q_;
+	  G = G * Sigma_ * G.transpose() + R_;
 	  return G;
 	}
 
@@ -221,7 +240,7 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
 	}
 
 	// tb4 ground_truth path publisher for ekf testing purposes. will comment out in favour of ground_truth publisher in test_trajectory node
-	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
+/*	void gtPoseCallback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
 	  int tb4_index = this->get_parameter("tb4_object_index").as_int();
 	  if (tb4_index < 0 || static_cast<size_t>(tb4_index) >= msg->poses.size()){
 		RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "tb4 index %d out of bounds", tb4_index);
@@ -245,20 +264,20 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
           accumulated_path_.poses.push_back(current_pose_stamped);
 
 	  tb4_gt_path_publisher_->publish(accumulated_path_);
-	}
+	}*/
 
-	nav_msgs::msg::Path accumulated_path_;
+//	nav_msgs::msg::Path accumulated_path_;
 	nav_msgs::msg::Path accumulated_ekfo_path_;
 	nav_msgs::msg::Path accumulated_ekf_dr_path_;
 
 	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
 	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_dr_;
-	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
+//	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_gt_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_dr_path_publisher_;
 	rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr tb4_ekfo_path_publisher_;
 	message_filters::Subscriber<geometry_msgs::msg::TwistStamped> cmd_vel_sub_;
 	message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
-	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_; // comment out once launching w test_trajectories file
+//	rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr tb4_gt_pose_subscriber_; // comment out once launching w test_trajectories file
 	std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<geometry_msgs::msg::TwistStamped, nav_msgs::msg::Odometry>>> sync;
 
 	Eigen::Matrix3d H_ = Eigen::Matrix3d::Identity(3, 3); // measurement jacobian
@@ -266,9 +285,8 @@ class ExtendedKalmanFilterOdom : public rclcpp::Node{
 	Eigen::Vector3d State_dr_ = Eigen::Vector3d(0, 0, 0); // pure dead-reckoning baseline (no landmark correction); predicted every cycle, never corrected
 	Eigen::Matrix3d Sigma_ = Eigen::Matrix3d::Identity(3, 3) * 0.01; // initialize starting covariance to small number since tb4's state is known at t = 0
 
-	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3) * 0.01 ; // measurement noise value
-	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3) * 0.001; // process noise value
-
+	Eigen::Matrix3d R_ = Eigen::Matrix3d::Identity(3, 3); // process noise value
+	Eigen::Matrix3d Q_ = Eigen::Matrix3d::Identity(3, 3); // measurement noise value
 };
 
 int main (int argc, char ** argv){
