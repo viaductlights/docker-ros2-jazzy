@@ -31,6 +31,6 @@ ujust dx-group
 systemctl reboot  
 ```
 
-test  
+test by running  
 `docker run hello-world`  
 
