@@ -5,7 +5,7 @@ Launches RViz2 with Nav2 display active, Turtlebot4 in gz-sim, and all nodes
 
 #### Trajectories  
 
-Trajectory 1: turtlebot position initialized, Nav2 display active. Default with above launch command.
+Trajectory 1: turtlebot position initialized, Nav2 display active. Default with above launch command.  
 Trajectory 2: short trajectory using NavigateThroughPoses action server  
 Trajectory 3: long trajectory using NavigateThroughPoses action server  
 Trajectory 4: short trajectory using NavigateToPose action server  
