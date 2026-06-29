@@ -2,8 +2,7 @@
 
 #### WHAT STARTS BADLY CAN NEVER IMPROVE... UNLESS: Measurement Model Error in Probabilistic State Estimation
 
-[Project README Page](https://github.com/viaductlights/docker-ros2-jazzy/blob/main/src/state_estimation/README.md)
-
+[Project README Page](https://github.com/viaductlights/docker-ros2-jazzy/tree/main/src/state_estimation)
 
 ##### docker container for probabilistic robotics lab project  
 runs ros2-jazzy on bazzite linux with turtlebot4 and other misc useful ros packages pre installed. includes dummy ros2 package called "robot_modelling" for a project in another class
